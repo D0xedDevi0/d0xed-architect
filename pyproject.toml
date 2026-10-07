@@ -1,0 +1,16 @@
+[project]
+name = "d0xed-architect"
+version = "0.1.0"
+description = "D0xed Architect — an identity-declared, x402-paying agentic crawler + code auditor."
+requires-python = ">=3.11"
+dependencies = ["cryptography>=42"]
+
+[project.scripts]
+architect = "architect.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["architect"]
