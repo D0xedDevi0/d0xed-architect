@@ -55,6 +55,10 @@ class Response:
     content_type: str = ""
     elapsed_ms: int = 0
     redirect_chain: list = field(default_factory=list)
+    # Set by architect.escalate when a browser was used, so reports can state
+    # how many pages genuinely needed rendering.
+    rendered: bool = False
+    escalation_reason: str = ""
 
     @property
     def text(self) -> str:

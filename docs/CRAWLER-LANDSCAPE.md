@@ -109,14 +109,13 @@ What we **do not** have, stated plainly:
 
 ## 4. What to build next, in priority order
 
-1. **Escalation, not replacement.** Keep HTTP-first as the default and escalate
-   to a browser *only* when a page looks JS-dependent (thin HTML, large script
-   payload, empty body). crw's "HTTP → LightPanda → Chrome CDP" ladder is the
-   right shape. This keeps the 45ms fast path and adds the capability without
-   paying Chromium cost on every request.
+1. ~~**Escalation, not replacement.**~~ **BUILT — see §6.** `architect/escalate.py`
+   keeps HTTP-first as the default and escalates to a browser only when the
+   *already-fetched* HTTP response classifies as a JS shell. crw's ladder shape,
+   implemented and measured.
 2. **Concurrency you can tune.** Adopt a memory-aware dispatcher with a rate
    limiter — crawl4ai's `MemoryAdaptiveDispatcher` is a good model, and it is
-   what stops a crawl from OOMing a small VPS (ours runs on 65MB; a naive
+   what stops a crawl from OOMing a small VPS (ours runs at 60–80MB; a naive
    browser pool would not).
 3. **Caching.** `CacheMode.BYPASS` on every page is what makes browser crawls
    expensive. A conditional-GET / ETag cache is the single biggest speedup
@@ -171,4 +170,61 @@ rather than one tool giving up early.
 
 See `bench/README.md` for the exact reproduction command and the ways the
 comparison is still not fair.
+
+---
+
+## 6. The escalation ladder (built)
+
+`architect/escalate.py` — HTTP first, escalate only when needed:
+
+```
+http()  ->  looks_js_dependent()  ->  [render()]  ->  Response
+```
+
+The classifier scores the **already-fetched** HTTP response; anything below the
+threshold is served straight from HTTP. Signals: thin visible text, near-empty
+body, script-dominated payload, SPA mount markers (`#root`, `#app`, `__NEXT_DATA__`,
+`ng-version`), a `<noscript>` asking for JavaScript, and module scripts with no text.
+
+**Measured behaviour (2026-10-07):**
+
+| Target | Verdict | HTTP text | Notes |
+|---|---|---|---|
+| `d0xeddev.com` (25 pages) | **0–1 escalations** | full | ladder added ~2.3s, i.e. one browser launch, not per page |
+| `app.uniswap.org` | **escalated** (score 7) | 64 chars | recovered 632 chars of real content only after JS ran |
+| `react.dev` | http-only (score 0) | 10,708 chars | correctly not rendered |
+| `tailwindcss.com` | http-only (score 0) | 6,921 chars | correctly not rendered |
+| `vercel.com` | http-only (score 0) | 1,729 chars | correctly not rendered |
+
+Real crawl, same 25 pages:
+
+| Mode | Wall | RSS | Escalations |
+|---|---|---|---|
+| plain (HTTP only) | 9.05 s | 60.3 MB | 0 |
+| `ARCH_MODE=ladder` | 11.39 s | 80.6 MB | 1 |
+
+**Read it honestly:**
+
+- The extra **2.3s is a single browser launch**, not a per-page cost. That is the
+  entire point of the design: the ladder's overhead is near-fixed, so it
+  amortises away on big crawls and stays small on small ones.
+- **The escalation rate on this site was not stable across runs** (1 of 25 in the
+  parallel crawl, 0 in two verification scans). The likely cause is a thin or
+  partial response under 6-way parallel fetching classifying as a shell. That is
+  a **false-positive cost**, and it is the main risk in this design: a wasted
+  browser launch, never wrong content. Worth measuring properly before trusting
+  the rate.
+- An `EscalationBudget` caps renders per crawl so a pathological site cannot turn
+  a cheap crawl into a browser farm. When the budget is exhausted it **falls
+  back to the HTTP response** and labels the verdict `budget-exhausted` — it
+  degrades, it does not fail.
+- `allow_render=False` gives a hard HTTP-only mode for callers who never want a
+  browser, and `force_render=True` for the opposite.
+
+**Known limits:** escalation is decided from HTTP alone, so a page that serves
+*full* HTML and *also* enriches itself with JS will not be rendered — by design,
+since we cannot know what we are missing without paying for the browser. And the
+render wait is a fixed `domcontentloaded` + 350ms settle, not a network-idle
+wait, so slow-hydrating apps may still come back partial.
+
 

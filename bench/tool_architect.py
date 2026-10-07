@@ -1,7 +1,13 @@
 """Bench runner: D0xed Architect crawler.
 
-argv: url max_pages depth   ->  prints one JSON line of metrics.
-Runs in its own process so peak RSS is that tool's, not a shared figure.
+Set ARCH_MODE=ladder to add the escalation pass. Prints one JSON line of
+metrics. Runs in its own process so peak RSS is that tool's, not a shared
+figure.
+
+ladder mode: fetch everything over HTTP in parallel (as normal), then render
+ONLY the pages whose HTTP response classified as a JS shell. Rendering is
+serial because Playwright's sync API is not thread-safe -- and because the
+whole point is that few pages need it.
 """
 import concurrent.futures as cf
 import json
@@ -15,8 +21,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from architect import extract as _extract   # noqa: E402
+from architect import escalate as _esc      # noqa: E402
 from architect import http as _http         # noqa: E402
 from architect.graph import Graph           # noqa: E402
+
+LADDER = (os.environ.get("ARCH_MODE") or "").lower() == "ladder"
+
+# escalate only imports playwright inside render(), so importing it is free.
+BUDGET = (_esc.EscalationBudget(
+    max_renders=int(os.environ.get("LADDER_MAX", "10"))) if LADDER else None)
 
 
 def _host(u: str) -> str:
@@ -39,10 +52,11 @@ def run(url, max_pages, depth):
 
     t0 = time.time()
     seen: set[str] = set()
-    pages = []
+    pages: list[str] = []
     bytes_total = 0
     edges = 0
     skipped = 0
+    escalations = 0
     md_chars = 0
 
     queue = [url]
@@ -58,45 +72,67 @@ def run(url, max_pages, depth):
         if not frontier or len(pages) >= max_pages:
             break
         nxt = []
+
+        fetched = []
         with cf.ThreadPoolExecutor(max_workers=6) as ex:
             futs = {ex.submit(_http.fetch, u, 15): u for u in frontier}
             for fut in cf.as_completed(futs):
-                u = futs[fut]
-                if u in seen:
+                try:
+                    fetched.append((futs[fut], fut.result()))
+                except Exception:
+                    fetched.append((futs[fut], None))
+
+        # Escalation pass: render only the shells, one at a time.
+        if LADDER:
+            for idx, (u, r) in enumerate(fetched):
+                if r is None or getattr(r, "status", 0) != 200:
                     continue
-                seen.add(u)
-                if len(pages) >= max_pages:
+                if "html" not in (getattr(r, "content_type", "") or ""):
+                    continue
+                verdict = _esc.looks_js_dependent(r)
+                if not verdict.needs_render:
+                    continue
+                if not BUDGET.spend():
                     continue
                 try:
-                    r = fut.result()
+                    rr = _esc.render(u, timeout=25)
                 except Exception:
-                    skipped += 1
                     continue
-                if r.status != 200:
-                    skipped += 1
-                    continue
-                ct = r.content_type or ""
-                if "html" not in ct and "text" not in ct:
-                    skipped += 1
-                    continue
-                body = r.body or b""
-                bytes_total += len(body)
-                p = _extract.extract(r.text or "", u)
-                pages.append(u)
-                md_chars += len(_extract.to_markdown(p))
-                graph.node("page", u, label=p.title or u)
-                for href, _t in p.links:
-                    tgt = urllib.parse.urljoin(u, href).split("#")[0]
-                    if _host(tgt) == same and tgt not in seen:
-                        nxt.append(tgt)
-                        graph.edge(u, tgt, "links")
-                        edges += 1
+                rr.escalation_reason = ",".join(verdict.reasons)
+                fetched[idx] = (u, rr)
+                escalations += 1
+
+        for u, r in fetched:
+            if u in seen:
+                continue
+            seen.add(u)
+            if r is None or getattr(r, "status", 0) != 200:
+                skipped += 1
+                continue
+            ct = getattr(r, "content_type", "") or ""
+            if "html" not in ct and "text" not in ct:
+                skipped += 1
+                continue
+            if len(pages) >= max_pages:
+                skipped += 1
+                continue
+            bytes_total += len(getattr(r, "body", b"") or b"")
+            p = _extract.extract(getattr(r, "text", "") or "", u)
+            pages.append(u)
+            md_chars += len(_extract.to_markdown(p))
+            graph.node("page", u, label=p.title or u)
+            for href, _t in p.links:
+                tgt = urllib.parse.urljoin(u, href).split("#")[0]
+                if _host(tgt) == same and tgt not in seen:
+                    nxt.append(tgt)
+                    graph.edge(u, tgt, "links")
+                    edges += 1
         queue = nxt
 
     wall = time.time() - t0
     st = graph.stats()
     return {
-        "tool": "d0xed-architect",
+        "tool": "d0xed-architect" + ("+ladder" if LADDER else ""),
         "url": url,
         "pages": len(pages),
         "wall_s": round(wall, 2),
@@ -107,6 +143,7 @@ def run(url, max_pages, depth):
         "markdown_chars": md_chars,
         "robots_found": bool(robots.found),
         "llms_found": bool(llms.found),
+        "escalations": escalations,
         "peak_rss_mb": round(
             resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1),
     }
