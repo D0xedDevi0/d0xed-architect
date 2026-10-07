@@ -23,6 +23,7 @@ sys.path.insert(0, ROOT)
 from architect import extract as _extract   # noqa: E402
 from architect import escalate as _esc      # noqa: E402
 from architect import http as _http         # noqa: E402
+from architect.cache import HttpCache       # noqa: E402
 from architect.graph import Graph           # noqa: E402
 
 LADDER = (os.environ.get("ARCH_MODE") or "").lower() == "ladder"
@@ -30,6 +31,10 @@ LADDER = (os.environ.get("ARCH_MODE") or "").lower() == "ladder"
 # escalate only imports playwright inside render(), so importing it is free.
 BUDGET = (_esc.EscalationBudget(
     max_renders=int(os.environ.get("LADDER_MAX", "10"))) if LADDER else None)
+
+# Optional sqlite HTTP cache. Point it at a file to make a WARM re-crawl cheap.
+CACHE_PATH = os.environ.get("ARCH_CACHE") or None
+CACHE = HttpCache(CACHE_PATH) if CACHE_PATH else None
 
 
 def _host(u: str) -> str:
@@ -57,6 +62,7 @@ def run(url, max_pages, depth):
     edges = 0
     skipped = 0
     escalations = 0
+    cached_pages = 0
     md_chars = 0
 
     queue = [url]
@@ -75,7 +81,8 @@ def run(url, max_pages, depth):
 
         fetched = []
         with cf.ThreadPoolExecutor(max_workers=6) as ex:
-            futs = {ex.submit(_http.fetch, u, 15): u for u in frontier}
+            futs = {ex.submit(_http.fetch, u, 15, None, True, CACHE): u
+                    for u in frontier}
             for fut in cf.as_completed(futs):
                 try:
                     fetched.append((futs[fut], fut.result()))
@@ -117,6 +124,8 @@ def run(url, max_pages, depth):
                 skipped += 1
                 continue
             bytes_total += len(getattr(r, "body", b"") or b"")
+            if getattr(r, "cached", False):
+                cached_pages += 1
             p = _extract.extract(getattr(r, "text", "") or "", u)
             pages.append(u)
             md_chars += len(_extract.to_markdown(p))
@@ -144,6 +153,8 @@ def run(url, max_pages, depth):
         "robots_found": bool(robots.found),
         "llms_found": bool(llms.found),
         "escalations": escalations,
+        "cache": CACHE.stats() if CACHE is not None else None,
+        "cached_pages": cached_pages,
         "peak_rss_mb": round(
             resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1),
     }

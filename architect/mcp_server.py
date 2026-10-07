@@ -20,6 +20,7 @@ from architect import evidence as _ev
 from architect import events as _events
 from architect import extract as _extract
 from architect import http as _http
+from architect import limiter as _limit
 from architect import nodes as _nodes
 from architect.graph import Graph
 
@@ -35,6 +36,18 @@ def _j(obj) -> str:
 def _origin(url: str) -> str:
     u = urllib.parse.urlsplit(url if "://" in url else "https://" + url)
     return f"{u.scheme}://{u.netloc}"
+
+
+def _host(url: str) -> str:
+    """Host with `www.` stripped.
+
+    Comparing hosts instead of URL prefixes matters: a site that redirects
+    d0xeddev.com -> www.d0xeddev.com would otherwise fail a startswith() check
+    on every internal link and report a one-page "successful" crawl.
+    """
+    h = urllib.parse.urlsplit(url if "://" in url else "https://" + url).netloc
+    h = h.lower().split(":")[0]
+    return h[4:] if h.startswith("www.") else h
 
 
 @srv.tool()
@@ -102,10 +115,19 @@ def map_site(url: str, max_pages: int = 25, depth: int = 2) -> str:
     robots = _http.load_robots(origin)
     llms = _http.load_llms_txt(origin)
 
+    # Per-host politeness + adaptive concurrency. If the origin declares a
+    # Crawl-delay we honour it as a floor; otherwise we still space requests.
+    limiter = _limit.HostLimiter(default_limit=6)
+    host = _host(start)
+    if getattr(robots, "crawl_delay", None):
+        limiter.set_crawl_delay(host, float(robots.crawl_delay))
+    else:
+        limiter.state(host).min_interval = 0.05
+
     queue = [start]
     for links in (getattr(llms, "sections", {}) or {}).values():
         for _, u, _n in links:
-            if u.startswith(origin):
+            if _host(u) == host:
                 queue.append(u)
 
     seen: set[str] = set()
@@ -120,8 +142,32 @@ def map_site(url: str, max_pages: int = 25, depth: int = 2) -> str:
         if not frontier or len(pages) >= max_pages:
             break
         nxt = []
+
+        def _grab(u: str):
+            st = limiter.acquire(u)
+            try:
+                r = _http.fetch(u, 15)
+            except Exception:
+                st.on_error()
+                raise
+            finally:
+                limiter.release(st)
+            # Feed the adaptive controller. Only an explicit 429 is rate-limit
+            # pushback; 503/500/405 are per-URL outcomes. Treating a 503 as
+            # throttling made an entire crawl compound an exponential host-wide
+            # backoff (2**n reached 64s) because a page listed ~20 dead API
+            # endpoints.
+            if r.status == 429:
+                st.on_throttled(_limit.parse_retry_after(
+                    (r.headers or {}).get("retry-after")))
+            elif r.status >= 400:
+                st.on_error()
+            else:
+                st.on_success()
+            return r
+
         with cf.ThreadPoolExecutor(max_workers=6) as ex:
-            futs = {ex.submit(_http.fetch, u, 15): u for u in frontier}
+            futs = {ex.submit(_grab, u): u for u in frontier}
             for fut in cf.as_completed(futs):
                 u = futs[fut]
                 if u in seen:
@@ -146,7 +192,7 @@ def map_site(url: str, max_pages: int = 25, depth: int = 2) -> str:
                 graph.node("page", u, label=page.title or u)
                 for href, _t in page.links:
                     tgt = urllib.parse.urljoin(u, href).split("#")[0]
-                    if tgt.startswith(origin) and tgt not in seen:
+                    if _host(tgt) == host and tgt not in seen:
                         nxt.append(tgt)
                         graph.edge(u, tgt, "links")
         queue = nxt
@@ -162,6 +208,8 @@ def map_site(url: str, max_pages: int = 25, depth: int = 2) -> str:
         "pages": [{"url": p.url, "title": p.title, "words": p.word_count}
                   for p in pages],
         "skipped": skipped[:25],
+        "politeness": limiter.stats(),
+        "crawl_delay": robots.crawl_delay,
     })
 
 

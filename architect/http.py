@@ -59,6 +59,8 @@ class Response:
     # how many pages genuinely needed rendering.
     rendered: bool = False
     escalation_reason: str = ""
+    # Set by architect.cache when the body came from cache (fresh hit or 304).
+    cached: bool = False
 
     @property
     def text(self) -> str:
@@ -94,8 +96,28 @@ def _identity_headers(agent_id: str | None = None) -> dict:
 
 
 def fetch(url: str, timeout: int = DEFAULT_TIMEOUT, agent_id: str | None = None,
-          allow_402: bool = True) -> Response:
-    req = urllib.request.Request(url, headers=_identity_headers(agent_id))
+          allow_402: bool = True, cache=None) -> Response:
+    """Fetch a URL, optionally through an architect.cache.HttpCache.
+
+    With a cache:
+      * a still-fresh stored response is served with NO network call;
+      * a stale one that has a validator is revalidated via
+        If-None-Match / If-Modified-Since, so an unchanged page costs a 304
+        round-trip instead of a full body.
+    """
+    entry = cache.get(url) if cache is not None else None
+    if cache is not None and entry is not None and entry.is_fresh():
+        cache.note_hit(url, entry)
+        return entry.to_response(cached=True)
+
+    headers = _identity_headers(agent_id)
+    if entry is not None and entry.has_validator():
+        if entry.etag:
+            headers["If-None-Match"] = entry.etag
+        if entry.last_modified:
+            headers["If-Modified-Since"] = entry.last_modified
+
+    req = urllib.request.Request(url, headers=headers)
     t0 = time.time()
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx()) as r:
@@ -105,19 +127,29 @@ def fetch(url: str, timeout: int = DEFAULT_TIMEOUT, agent_id: str | None = None,
                     raw = gzip.decompress(raw)
                 except Exception:
                     pass
-            return Response(
+            resp = Response(
                 url=r.geturl(), status=r.status,
                 headers={k.lower(): v for k, v in r.headers.items()},
                 body=raw, content_type=r.headers.get("Content-Type", ""),
                 elapsed_ms=int((time.time() - t0) * 1000),
             )
+            if cache is not None:
+                cache.note_miss()
+                cache.put(url, resp)
+            return resp
     except urllib.error.HTTPError as e:
+        hdrs = {k.lower(): v for k, v in (e.headers or {}).items()}
+        # 304 Not Modified: revalidated, body unchanged -> serve the stored copy.
+        # urllib raises for 304 because it is not 2xx, so it lands here.
+        if e.code == 304 and entry is not None:
+            if cache is not None:
+                cache.note_revalidated(url, entry)
+            return entry.to_response(cached=True)
         body = b""
         try:
             body = e.read(MAX_BYTES)[:MAX_BYTES]
         except Exception:
             pass
-        hdrs = {k.lower(): v for k, v in (e.headers or {}).items()}
         if e.code == 402:
             price = (hdrs.get("x-price") or hdrs.get("x-payment-amount")
                      or hdrs.get("price") or _parse_price_from_body(body))
@@ -151,6 +183,9 @@ class Robots:
     sitemaps: list = field(default_factory=list)
     raw: str = ""
     found: bool = False
+    # Crawl-delay is a politeness request from the origin. We treat the largest
+    # declared value as a FLOOR on our request interval, never a ceiling.
+    crawl_delay: float | None = None
 
     def can_fetch(self, path: str) -> bool:
         best = None
@@ -180,6 +215,14 @@ def parse_robots(text: str) -> Robots:
             r.disallow.append(val)
         elif group_is_star and key == "allow" and val:
             r.allow.append(val)
+        elif group_is_star and key == "crawl-delay" and val:
+            try:
+                delay = float(val)
+                # Take the most conservative declared delay.
+                if r.crawl_delay is None or delay > r.crawl_delay:
+                    r.crawl_delay = delay
+            except ValueError:
+                pass
         elif key == "content-signal":
             for part in val.split(","):
                 if "=" in part:

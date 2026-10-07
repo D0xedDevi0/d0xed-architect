@@ -113,13 +113,11 @@ What we **do not** have, stated plainly:
    keeps HTTP-first as the default and escalates to a browser only when the
    *already-fetched* HTTP response classifies as a JS shell. crw's ladder shape,
    implemented and measured.
-2. **Concurrency you can tune.** Adopt a memory-aware dispatcher with a rate
-   limiter — crawl4ai's `MemoryAdaptiveDispatcher` is a good model, and it is
-   what stops a crawl from OOMing a small VPS (ours runs at 60–80MB; a naive
-   browser pool would not).
-3. **Caching.** `CacheMode.BYPASS` on every page is what makes browser crawls
-   expensive. A conditional-GET / ETag cache is the single biggest speedup
-   available to us for repeat crawls.
+2. ~~**Concurrency you can tune.**~~ **BUILT — see §7.** `architect/limiter.py`:
+   per-host AIMD, minimum interval, `Retry-After`, and robots `Crawl-delay` as a
+   floor. Deliberately a *rate limiter*, not a memory-adaptive dispatcher.
+3. ~~**Caching.**~~ **BUILT — see §7.** `architect/cache.py`: conditional-GET /
+   ETag revalidation, sqlite-backed so it persists across runs.
 4. **`/extract`-style typed output.** Markdown is the right default, but agents
    often want a schema. This is where Firecrawl's value concentrates.
 5. **Publish the benchmark.** Nobody in this space ships reproducible
@@ -226,5 +224,80 @@ Real crawl, same 25 pages:
 since we cannot know what we are missing without paying for the browser. And the
 render wait is a fixed `domcontentloaded` + 350ms settle, not a network-idle
 wait, so slow-hydrating apps may still come back partial.
+
+---
+
+## 7. Caching and politeness (built)
+
+### `architect/cache.py` — conditional GET
+
+sqlite-backed, so the cache is a real file across runs rather than per-process.
+Two distinct wins: *freshness* (`max-age`) serves with zero network, and
+*revalidation* (`ETag` / `Last-Modified`) sends `If-None-Match` so an unchanged
+page costs a 304 instead of a full body.
+
+**Measured, warm re-crawl of `d0xeddev.com` (25 pages):**
+
+| | cold | warm |
+|---|---|---|
+| wall | 9.29s | 8.66s |
+| body transferred | ~1.05 MB | **~0.002 MB** |
+| pages from cache | 0/25 | 25/25 |
+
+**The honest read: a bandwidth win, not a latency win.** The site sends
+`cache-control: max-age=0, must-revalidate`, so nothing is ever *fresh* and every
+page revalidates. A 304 still costs a full round-trip, and on a small fast site
+latency is round-trip-bound, not byte-bound. The prediction "repeat crawls are
+nearly free" was **right on bytes, wrong on time**. Where an origin actually
+sends a `max-age`, the zero-network path is real and is unit-tested
+(`fresh hit makes NO network call`).
+
+The assertion that matters more than any number: a page that **changed** must
+return the new body, never the stale one. A cache that silently serves stale
+content corrupts every downstream report, so it has its own test.
+
+### `architect/limiter.py` — adaptive per-host concurrency
+
+- **AIMD**: additive increase after 5 clean results, multiplicative decrease on
+  pushback. Slow up, fast down.
+- **Per-host minimum interval**, with robots.txt `Crawl-delay` honoured as a
+  **floor** — a smaller declared delay can never speed us past our own default.
+- **`Retry-After`** parsed in both legal forms (delta-seconds and HTTP-date).
+- **429 vs 503 — the distinction that turned out to matter.** Only a 429 is
+  rate-limit pushback. A 503/500/405 is an outcome for *one URL*, never a
+  host-capacity signal.
+
+### The bug this section exists to record
+
+Wiring the limiter into `map_site` turned a **~9s crawl into 193s**; the 25-page
+crawl then blew past a 280s timeout. Root cause, found by measuring rather than
+guessing: the site's page lists **~20 API endpoints returning 503/500/405**.
+Every 503 was routed to `on_throttled()`, which compounds `2**n` host-wide
+backoff — by the sixth, 64 seconds per request, serialising the entire crawl
+behind dead endpoints.
+
+Three fixes, each now pinned by a test:
+
+1. only **429** drives throttling; 5xx/405/timeouts are recorded through
+   `on_error()` and deliberately do **not** touch the concurrency limit or set
+   host backoff;
+2. exponential backoff is **capped**, never unbounded `2**n`;
+3. `on_success()` **decays** the penalty counter, so penalties cannot accumulate
+   across unrelated URLs over a whole crawl.
+
+Plus a smaller one: `Retry-After: 0` means "retry now", but `0` is falsy, so a
+`if retry_after else ...` check silently promoted it to exponential backoff.
+
+Result: **193s → 9.5s** for `8/1`; `25/2` now completes in 9.5s.
+
+**Generalise the lesson:** a per-URL error and a host-wide backpressure signal
+are different things, and conflating them makes the crawler punish every healthy
+URL for one dead one. Every test was green while this was broken — none of them
+covered the integration path. Passing unit tests on a component say nothing
+about the component once it is wired in.
+
+**Still open:** this is a *rate* limiter, not a memory-adaptive dispatcher. There
+is no backpressure from our own memory use, so a very large frontier could still
+grow RSS. That remains item 2's unbuilt half.
 
 
