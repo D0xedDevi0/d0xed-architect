@@ -287,6 +287,53 @@ def main():
               contract.is_test_path("test/Vault.t.sol")
               and not contract.is_test_path("src/Vault.sol"))
 
+        print("\n── a failed-call branch is not reentrancy ──")
+        rc = os.path.join(tmp, "rc")
+        os.makedirs(rc, exist_ok=True)
+        # SAFE: the write is only reached when the call FAILED, and a failed
+        # call reverts — so nothing the callee did survived.
+        with open(os.path.join(rc, "Safe.sol"), "w") as fh:
+            fh.write("pragma solidity 0.8.24;\ncontract S {\n"
+                     "    mapping(address=>uint256) public owed;\n"
+                     "    function pay() external {\n"
+                     "        (bool sent, ) = msg.sender.call{value: 1}('');\n"
+                     "        if (!sent) {\n            owed[msg.sender] += 1;\n        }\n"
+                     "    }\n}\n")
+        # UNSAFE: the write is on the success path, after the call landed.
+        with open(os.path.join(rc, "Unsafe.sol"), "w") as fh:
+            fh.write("pragma solidity 0.8.24;\ncontract U {\n"
+                     "    mapping(address=>uint256) public owed;\n"
+                     "    function pay() external {\n"
+                     "        (bool sent, ) = msg.sender.call{value: 1}('');\n"
+                     "        if (sent) {\n            owed[msg.sender] += 1;\n        }\n"
+                     "    }\n}\n")
+        rcf = contract.audit_contracts(rc, "contract")
+        safe_hits = [f for f in rcf
+                     if "Safe.sol" in f.path and f.rule == "reentrancy_state_after_call"]
+        unsafe_hits = [f for f in rcf
+                       if "Unsafe.sol" in f.path and f.rule == "reentrancy_state_after_call"]
+        check("failure-guarded write is NOT reentrancy", not safe_hits, f"got {len(safe_hits)}")
+        check("success-path write IS reentrancy", len(unsafe_hits) >= 1, f"got {len(unsafe_hits)}")
+
+        print("\n── multi-line evasion must not hide a finding ──")
+        ml = os.path.join(tmp, "ml")
+        os.makedirs(ml, exist_ok=True)
+        with open(os.path.join(ml, "Rand.sol"), "w") as fh:
+            fh.write("pragma solidity 0.8.24;\ncontract R {\n"
+                     "    function f(uint256 id) internal {\n"
+                     "        uint256 seed = uint256(keccak256(abi.encodePacked(\n"
+                     "            block.prevrandao, block.timestamp, id, msg.sender\n"
+                     "        )));\n    }\n}\n")
+        mlf = contract.audit_contracts(ml, "contract")
+        check("a call split across lines is still caught",
+              any(f.rule == "weak_randomness" for f in mlf),
+              f"got {[f.rule for f in mlf]}")
+        check("the multi-line finding still carries a real line",
+              all(f.snippet and f.line >= 1 for f in mlf if f.rule == "weak_randomness"))
+        check("multi-line pass does not duplicate the single-line case",
+              len([f for f in mlf if f.rule == "weak_randomness"]) == 1,
+              f"got {len([f for f in mlf if f.rule == 'weak_randomness'])}")
+
         print("\n── non-tty: piping to a file still produces something honest ──")
         sio = io.StringIO()
         bus3 = events.EventBus()

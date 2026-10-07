@@ -110,6 +110,18 @@ _STATE_WRITE = re.compile(
     r"^\s*(?:\w+(?:\[\S*\])?(?:\.\w+)?)\s*(?:[-+*/]?=|\+\+|--)\s*[^=]")
 _WINDOW = 12
 
+# Some patterns only exist ACROSS lines. A `keccak256(abi.encodePacked(` whose
+# arguments sit on the following line evades every per-line rule — and a missed
+# finding is worse than a false one, because the report is wrong in the
+# direction people trust. This pass scans the whole source with DOTALL.
+_MULTILINE_RULES: list[tuple[str, str, str, str]] = [
+    ("weak_randomness", "high",
+     r"keccak256\s*\(\s*abi\.encodePacked\s*\([^;]{0,200}?"
+     r"(?:block\.(?:prevrandao|difficulty|number|timestamp)\b|blockhash\s*\()",
+     "seed derived from a block variable across lines — influenceable by the "
+     "block producer and by simulating against a known block"),
+]
+
 # Test-only code is still code, but a reentrancy in a mock router is not a
 # production risk. Findings here are kept and annotated, never dropped —
 # silently hiding them would be the same dishonesty as inflating them.
@@ -142,14 +154,33 @@ def scan_source(source: str) -> list[tuple[str, str, int, str]]:
     hits: list[tuple[str, str, int, str]] = []
     lines = source.splitlines()
 
+    # Multi-line pass runs FIRST so the single-line rules can be told which
+    # lines a more specific match already covers.
+    ml_spans: list[tuple[int, int]] = []
+    for rule, severity, pattern, detail in _MULTILINE_RULES:
+        for m in re.finditer(pattern, source, re.S):
+            start = source.count("\n", 0, m.start()) + 1
+            end = source.count("\n", 0, m.end()) + 1
+            ml_spans.append((start, end))
+            hits.append((rule, severity, start, detail))
+
+    def _covered(line: int) -> bool:
+        return any(a <= line <= b for a, b in ml_spans)
+
     for rule, severity, pattern, detail in RULES:
         rx = re.compile(pattern)
         for i, line in enumerate(lines, 1):
             stripped = line.strip()
             if stripped.startswith("//") or stripped.startswith("*"):
                 continue
-            if rx.search(line):
-                hits.append((rule, severity, i, detail))
+            if not rx.search(line):
+                continue
+            # The generic block-variable rule must not re-report a line that a
+            # specific seed-derivation match already covers: one issue, one
+            # finding. Two findings for one problem is how a report loses trust.
+            if rule == "weak_randomness" and detail.startswith("block.") and _covered(i):
+                continue
+            hits.append((rule, severity, i, detail))
 
     # Low-level calls: a finding only when the success flag goes unchecked.
     # Flagging every `.call` would fire on correct checks-effects-interactions
@@ -182,6 +213,14 @@ def scan_source(source: str) -> list[tuple[str, str, int, str]]:
             if not stripped or stripped.startswith("//"):
                 continue
             if _STATE_WRITE.match(nxt) and "==" not in nxt:
+                # A write that lives inside an `if (!ok) { ... }` branch is
+                # reached ONLY when the call failed — and a failed call
+                # reverts, so nothing the callee did survived. Flagging it is
+                # a false positive, and false CRITICALS are how a scanner
+                # trains its reader to ignore it.
+                guard = "\n".join(lines[i:j])
+                if re.search(r"if\s*\(\s*!\s*\w+\s*\)\s*\{", guard):
+                    continue
                 hits.append((
                     "reentrancy_state_after_call", "critical", j + 1,
                     f"state written after an external call at line {i + 1} — "
