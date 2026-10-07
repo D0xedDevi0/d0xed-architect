@@ -47,8 +47,9 @@ crawler."*
 | Single-use Ed25519 capability tokens (burn on clean grant) | ✅ shipped |
 | SHA-256 manifest + per-artifact integrity receipts | ✅ shipped |
 | Static code audit (secrets, risk patterns, import graph) | ✅ shipped |
-| Contract audit lane (Solidity / Base / Eth) | 🟦 next |
-| TUI + live swarm view | 🟦 next |
+| Contract audit lane (Solidity / Base / Eth) | ✅ shipped |
+| TUI + live swarm view | ✅ shipped |
+| Per-finding evidence receipts + `verify-report` | ✅ shipped |
 | One-line install + public node registry | 🟦 next |
 
 ---
