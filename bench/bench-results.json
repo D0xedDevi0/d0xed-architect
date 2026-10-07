@@ -1,0 +1,35 @@
+{
+  "url": "https://d0xeddev.com",
+  "max_pages": 25,
+  "depth": 2,
+  "results": [
+    {
+      "tool": "d0xed-architect",
+      "url": "https://d0xeddev.com",
+      "pages": 25,
+      "wall_s": 8.73,
+      "bytes": 1061725,
+      "edges": 265,
+      "graph_nodes": 25,
+      "skipped": 28,
+      "markdown_chars": 76155,
+      "robots_found": true,
+      "llms_found": true,
+      "peak_rss_mb": 66.1
+    },
+    {
+      "tool": "crawl4ai",
+      "url": "https://d0xeddev.com",
+      "pages": 25,
+      "wall_s": 23.77,
+      "bytes": 1811688,
+      "edges": 94,
+      "graph_nodes": 0,
+      "skipped": 0,
+      "markdown_chars": 119317,
+      "robots_found": null,
+      "llms_found": null,
+      "peak_rss_mb": 132.2
+    }
+  ]
+}
