@@ -203,6 +203,80 @@ def node_deps(root: str) -> NodeResult:
     return res
 
 
+# ── node: sentinel ─────────────────────────────────────────────────────────
+
+SENTINEL_FINDING_CAP = 25
+_SENTINEL_SEVERITY = {"breaking": "high", "notable": "medium", "info": "info"}
+
+
+def node_sentinel(root: str, ctx=None) -> NodeResult:
+    """Compare a signed architecture baseline; only current modules get receipts.
+
+    Removed modules have no current file to cite, so they are stats, not findings.
+    Other drift without an unambiguous current source line is stats-only too.
+    """
+    from . import sentinel as _sentinel  # lazy: sentinel imports the node file rules
+
+    res = NodeResult("sentinel")
+    current = _sentinel.capture(root)
+    res.stats.update(baseline="none", arch_root=current["arch_root"][:12],
+                     modules=len(current["modules"]), files=len(current["modules"]))
+    baseline_path = os.path.abspath(os.environ.get("ARCHITECT_BASELINE") or
+                                     os.path.join(root, ".architect-baseline.json"))
+    if not os.path.isfile(baseline_path):
+        res.stats["note"] = "No baseline; capture and sign one to compare architecture drift."
+        return res
+
+    res.stats["baseline"] = "found"
+    # Key material stays beside the baseline, not inside the audited tree.
+    keydir = os.path.join(os.path.dirname(baseline_path), ".architect-keys")
+    loader = getattr(_sentinel, "load_baseline", None)
+    if loader is not None:
+        baseline = loader(baseline_path)
+    else:
+        with open(baseline_path, encoding="utf-8") as fh:
+            baseline = json.load(fh)
+    ok, reason = True, ""
+    if "sig" in baseline:
+        ok, reason = _sentinel.verify_baseline(baseline, keydir)
+        if not ok:
+            raise ValueError(f"baseline refused: {reason}")
+    drift = _sentinel.diff(baseline, current)["drift"]
+    res.stats.update({sev: sum(item["severity"] == sev for item in drift)
+                      for sev in _SENTINEL_SEVERITY})
+    res.stats["removed"] = [item["target"] for item in drift
+                            if item["kind"] == "module_removed"]
+
+    # Snapshot membership prevents forged/escaped paths and excludes symlinks.
+    # One receipt per changed module; import/entrypoint/dep changes are counted
+    # in drift totals, never assigned an unrelated line as evidence.
+    for item in drift:
+        if len(res.findings) >= SENTINEL_FINDING_CAP:
+            break
+        if item["kind"] not in ("module_added", "module_modified"):
+            continue
+        rel = item["target"]
+        if rel not in current["modules"]:
+            continue
+        path = os.path.join(root, rel)
+        if os.path.islink(path) or not os.path.isfile(path) or not os.path.realpath(path).startswith(os.path.realpath(root) + os.sep):
+            continue
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                lines = fh.read().splitlines()
+            file_hash = _ev.sha256_file(path)
+        except OSError:
+            continue
+        if file_hash != current["modules"][rel]:
+            continue  # tree changed mid-capture; never cite a different revision
+        receipt = _ev.capture(root, rel, 1, "sentinel:" + item["kind"],
+                              _SENTINEL_SEVERITY[item["severity"]], item["detail"],
+                              node="sentinel", lines=lines, file_hash=file_hash)
+        if receipt:
+            res.findings.append(receipt)
+    return res
+
+
 # ── registry + runner ──────────────────────────────────────────────────────
 
 NODES = {
@@ -210,6 +284,7 @@ NODES = {
     "secrets": node_secrets,
     "contract": node_contract,
     "deps": node_deps,
+    "sentinel": node_sentinel,
 }
 
 DEFAULT_NODES = ("repo", "secrets", "deps")
@@ -230,8 +305,14 @@ def run_node(name: str, root: str, bus: _events.EventBus) -> NodeResult:
     for f in sorted(res.findings, key=lambda x: x.severity):
         bus.emit(_events.FINDING, node=name, severity=f.severity, rule=f.rule,
                  where=f"{f.path}:{f.line}", receipt=f.receipt)
-    bus.emit(_events.NODE_DONE, node=name, findings=len(res.findings),
-             files=res.stats.get("files", 0), duration=res.duration)
+    done_payload = {"findings": len(res.findings),
+                    "files": res.stats.get("files", 0), "duration": res.duration}
+    if name == "sentinel":
+        done_payload["modules"] = res.stats.get("modules", 0)
+        done_payload["baseline"] = res.stats.get("baseline", "none")
+        done_payload.update({k: res.stats[k] for k in ("breaking", "notable", "info")
+                             if k in res.stats})
+    bus.emit(_events.NODE_DONE, node=name, **done_payload)
     return res
 
 

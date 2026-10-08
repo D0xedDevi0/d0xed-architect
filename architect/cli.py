@@ -429,6 +429,88 @@ def cmd_verify_report(args) -> int:
     return 1
 
 
+def cmd_sentinel_verify(args) -> int:
+    from . import sentinel as _sentinel
+
+    try:
+        with open(args.report, encoding="utf-8") as fh:
+            report = json.load(fh)
+    except (OSError, ValueError, UnicodeError) as exc:
+        print(f"NOT OK: cannot read report: {exc}")
+        return 1
+    ok, reason = _sentinel.verify_drift(report, args.keys)
+    print("ok" if ok else f"NOT OK: {reason}")
+    return 0 if ok else 1
+
+
+def cmd_sentinel(args) -> int:
+    from . import sentinel as _sentinel
+
+    root = os.path.abspath(args.path)
+    if not os.path.isdir(root):
+        print(f"[architect] not a directory: {root}", file=sys.stderr)
+        return 2
+    if args.out and os.path.commonpath((root, os.path.abspath(args.out))) == root:
+        print("[architect] output must be outside the audited tree", file=sys.stderr)
+        return 2
+    try:
+        if args.mode == "capture":
+            snap = _sentinel.capture(root)
+            if args.sign:
+                # Keep generated private keys outside the audited tree too.
+                keys = os.path.join(os.path.dirname(os.path.abspath(args.out)), ".architect-keys")
+                if os.path.commonpath((root, keys)) == root:
+                    raise ValueError("key directory must be outside the audited tree")
+                snap = _sentinel.sign_baseline(snap, keys)
+            with open(args.out, "w", encoding="utf-8") as fh:
+                json.dump(snap, fh, indent=2, sort_keys=True)
+                fh.write("\n")
+            if args.json:
+                print(json.dumps(snap, indent=2, sort_keys=True))
+            else:
+                print(f"{snap['arch_root']}  {snap['stats']['files']} files")
+            return 0
+        with open(args.baseline, encoding="utf-8") as fh:
+            base = json.load(fh)
+        if "sig" in base:
+            keys = os.path.join(os.path.dirname(os.path.abspath(args.baseline)), ".architect-keys")
+            ok, reason = _sentinel.verify_baseline(base, keys)
+            if not ok:
+                print(f"[architect] baseline refused: {reason}", file=sys.stderr)
+                return 2
+        now = _sentinel.capture(root)
+        result = _sentinel.diff(base, now)
+        if args.sign:
+            keys = os.path.join(os.path.dirname(os.path.abspath(args.baseline)), ".architect-keys")
+            target = args.out or args.baseline + ".diff.json"
+            if os.path.commonpath((root, os.path.abspath(target))) == root:
+                raise ValueError("output must be outside the audited tree")
+            if os.path.commonpath((root, keys)) == root:
+                raise ValueError("key directory must be outside the audited tree")
+            result = _sentinel.sign_drift({**result, "baseline": {"arch_root": base["arch_root"]}}, keys)
+            with open(target, "w", encoding="utf-8") as fh:
+                json.dump(result, fh, indent=2, sort_keys=True)
+                fh.write("\n")
+        items = result["drift"]
+        severities = {s: sum(i["severity"] == s for i in items)
+                      for s in ("breaking", "notable", "info")}
+        summary = ("no drift (architecture unchanged)" if not items else
+                   f"{len(items)} drift: " + ", ".join(
+                       f"{n} {s}" for s, n in severities.items() if n))
+        lines = [summary] + [f"{i['severity']}  {i['kind']}  {i['target']}" for i in items]
+        if args.out and not args.sign:
+            with open(args.out, "w", encoding="utf-8") as fh:
+                fh.write("# Architecture drift\n\n" + "\n".join(lines) + "\n\n"
+                         + "\n".join(result["limits"]) + "\n")
+        print(json.dumps(result, indent=2, sort_keys=True) if args.json else "\n".join(lines))
+        if args.sign:
+            print(f"kid: {result['sig']['kid']}  identity: {result['sig']['identity']}")
+        return 1 if severities["breaking"] else 0
+    except (OSError, ValueError, KeyError, TypeError, _auth.AuthError) as exc:
+        print(f"[architect] sentinel failed: {exc}", file=sys.stderr)
+        return 2
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(
         prog="architect",
@@ -531,6 +613,27 @@ def main(argv=None) -> int:
     vr.add_argument("report")
     vr.add_argument("--root", help="defaults to the root recorded in the report")
     vr.set_defaults(fn=cmd_verify_report)
+
+    sn = sub.add_parser("sentinel", help="capture and compare architecture baselines")
+    modes = sn.add_subparsers(dest="mode", required=True)
+    sc = modes.add_parser("capture", help="capture an architecture baseline")
+    sc.add_argument("path")
+    sc.add_argument("--out", required=True, help="baseline JSON outside audited tree")
+    sc.add_argument("--sign", action="store_true")
+    sc.add_argument("--json", action="store_true")
+    sc.set_defaults(fn=cmd_sentinel)
+    sd = modes.add_parser("diff", help="compare against a baseline")
+    sd.add_argument("path")
+    sd.add_argument("--baseline", required=True)
+    sd.add_argument("--json", action="store_true")
+    sd.add_argument("--out", help="markdown report outside audited tree (JSON with --sign)")
+    sd.add_argument("--sign", action="store_true")
+    sd.set_defaults(fn=cmd_sentinel)
+    sv = modes.add_parser("verify", help="verify a signed drift JSON report")
+    sv.add_argument("report")
+    sv.add_argument("--keys", default=".architect-keys",
+                    help="trusted public PEM file or key directory (default .architect-keys)")
+    sv.set_defaults(fn=cmd_sentinel_verify)
 
     args = p.parse_args(argv)
     return args.fn(args)
