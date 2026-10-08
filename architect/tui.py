@@ -95,10 +95,13 @@ class SwarmView:
             elif ev.kind == _events.NODE_START:
                 self.nodes.setdefault(ev.node, {}).update(status="running")
             elif ev.kind == _events.NODE_DONE:
-                self.nodes.setdefault(ev.node, {}).update(
-                    status="done", findings=ev.payload.get("findings", 0),
-                    files=ev.payload.get("files", 0),
-                    duration=ev.payload.get("duration", 0.0))
+                d = {"status": "done", "findings": ev.payload.get("findings", 0),
+                     "files": ev.payload.get("files", 0),
+                     "duration": ev.payload.get("duration", 0.0)}
+                for k in ("modules", "baseline", "breaking", "notable", "info"):
+                    if k in ev.payload:
+                        d[k] = ev.payload[k]
+                self.nodes.setdefault(ev.node, {}).update(d)
             elif ev.kind == _events.NODE_ERROR:
                 self.nodes.setdefault(ev.node, {}).update(status="error")
             elif ev.kind == _events.FINDING:
@@ -148,9 +151,18 @@ class SwarmView:
         for name, st in nodes.items():
             col, mark = NODE_MARK.get(st.get("status", "pending"), ("dim", "·"))
             label = f" {self._c(col, mark)} {pad(trunc(name, 12), 12)}"
-            tail = (f"{st.get('files', 0):>4}f {st.get('duration', 0):>5.2f}s"
-                    if st.get("status") in ("done", "running")
-                    else self._c("dim", "pending"))
+            if (name == "sentinel" and st.get("status") == "done"
+                    and any(k in st for k in ("breaking", "notable", "info"))):
+                b, n, i = (st.get("breaking", 0), st.get("notable", 0),
+                           st.get("info", 0))
+                tail = f"{b}B/{n}N/{i}I drift"
+            elif (name == "sentinel" and st.get("status") == "done"
+                    and st.get("baseline") == "none"):
+                tail = self._c("dim", "no baseline")
+            else:
+                tail = (f"{st.get('files', 0):>4}f {st.get('duration', 0):>5.2f}s"
+                        if st.get("status") in ("done", "running")
+                        else self._c("dim", "pending"))
             left_lines.append(label + self._c("dim", tail))
 
         total = sum(counts.values())

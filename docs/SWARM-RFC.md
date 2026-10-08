@@ -51,6 +51,8 @@ crawler."*
 | TUI + live swarm view | ✅ shipped |
 | Per-finding evidence receipts + `verify-report` | ✅ shipped |
 | One-line install + public node registry | 🟦 next |
+| Architecture drift — `arch_root` + signed baseline + 9-class drift diff | ✅ shipped (v0.5) |
+| Deterministic SVG drift map (`viz.py`) | ✅ shipped (v0.5) |
 
 ---
 
@@ -62,7 +64,8 @@ needed."* Not one monolith. A swarm of small, single-purpose nodes.
 | Node | Job | Reads |
 |---|---|---|
 | `site` | map a domain, honour crawl contracts, find 402 gates | HTTP |
-| `repo` | import graph, dead code, architecture drift, entrypoints | source tree |
+| `repo` | import graph, dead code, entrypoints | source tree |
+| `sentinel` | baseline vs. current architecture: drift, breaking changes | source tree |
 | `secrets` | credential + entropy scan with an example/placeholder allowlist | source tree |
 | `deps` | dependency vulns, lockfile drift, licence conflicts | manifests |
 | `contract` | reentrancy, access control, upgrade hazards, token traps | Solidity + bytecode |
