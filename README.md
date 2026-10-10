@@ -67,5 +67,7 @@ refused cleanly.
 - **v0.4** MCP server so any agent can drive it
 - **v0.5** architecture drift: `sentinel capture` / `sentinel diff` + SVG drift map
 - **v0.5** JS/TS import extraction beyond the current best-effort pass
+- **Next:** typed, evidence-backed extraction with opt-in, budgeted Nous Portal model fallback; then a separate extraction-quality benchmark.
+- **After the initial crawler build:** package capabilities into **DEVin**, a builder/architect/debugging agent for Looper #706 with Telegram contract/code/link intake. Identity, authorization, and sandbox gates must be verified before activation. [Design and saved roadmap](docs/superpowers/specs/2026-10-10-typed-extraction-and-devin-roadmap-design.md).
 
 _NFA. DYOR. Built in the open._
