@@ -58,6 +58,53 @@ export ARCHITECT_PASSPHRASE='...'
 A signed baseline (`--sign`) is verified before it is trusted; a tampered one is
 refused cleanly.
 
+## Typed extraction (opt-in MCP tool)
+
+The `extract_typed(url, schema_json, use_llm=False, max_model_calls=1)` MCP tool
+returns schema-shaped values and per-field literal excerpts, locators, methods,
+and SHA-256 of fetched source bytes. `scrape_url` still returns markdown. Schemas
+are capped at 8 KiB / 16 fields; selectors are declarative (`title`, `h1`,
+`description`, `canonical`, `lang`, `headings`, `links`, `text`, `jsonld:<key>`).
+Unsupported values are `null`. The new fetch path checks public DNS at each
+redirect, validates robots.txt before page fetching, rejects 402 without payment,
+and caps responses. Its SSRF defenses rely on the bundled pinned-IP stdlib HTTP
+transport; do not replace that transport with an unguarded client in production.
+
+The model path is **off by default**. To use Nous Portal via Hermes OAuth, start
+its loopback proxy (in another terminal/session) before calling with
+`use_llm=True`:
+
+```bash
+hermes proxy start --provider nous --host 127.0.0.1 --port 8901
+```
+
+It uses the catalog-tested `deepseek/deepseek-v4.1-flash` model through that
+fixed loopback endpoint. No API key is stored in this project. If the proxy is
+absent, the model step fails closed and deterministic partial results remain.
+At most one 12,000-character / 512-output-token model call processes unresolved
+fields; explicitly selected DOM/JSON-LD fields are never guessed by the model.
+Every accepted model field must also have a verbatim excerpt in fetched bytes.
+For `text` without a hint, the normalized visible text carries an array of
+verbatim DOM text nodes as evidence (up to 32 nodes / 1,000 source characters);
+larger or entity-decoded pages abstain instead of claiming unsupported evidence.
+The legacy markdown parser remains the default; typed-only hidden-content
+filtering does not change `scrape_url` output.
+Model usage/cost is **provider-reported after the call**, not a certified
+pre-call USD ceiling. There is no automatic payment or model call on the default
+path. The proxy is a local service; protect the host from untrusted co-tenants.
+
+Run the small fixture quality evaluation separately from crawl-speed benchmarks:
+
+```bash
+.venv/bin/python bench/typed_eval.py --mode deterministic
+.venv/bin/python bench/typed_eval.py --mode llm --allow-live-model
+```
+
+The nine handcrafted fixtures exercise evidence, ambiguity, abstention, hidden
+content, and mixed extraction; their scores are *not* a production accuracy
+estimate. The paid run reports actual model calls, usage, and provider-reported
+cost, or `unknown` if missing. See `docs/superpowers/plans/2026-10-10-typed-extraction.md`.
+
 ## Roadmap
 
 - **v0.2** Ed25519 key-directory + RFC 9421 HTTP Message Signatures (real Web Bot Auth)
@@ -67,7 +114,7 @@ refused cleanly.
 - **v0.4** MCP server so any agent can drive it
 - **v0.5** architecture drift: `sentinel capture` / `sentinel diff` + SVG drift map
 - **v0.5** JS/TS import extraction beyond the current best-effort pass
-- **Next:** typed, evidence-backed extraction with opt-in, budgeted Nous Portal model fallback; then a separate extraction-quality benchmark.
+- **Built:** typed, evidence-backed extraction with optional Nous Portal fallback and a separate, small extraction-quality fixture benchmark.
 - **After the initial crawler build:** package capabilities into **DEVin**, a builder/architect/debugging agent for Looper #706 with Telegram contract/code/link intake. Identity, authorization, and sandbox gates must be verified before activation. [Design and saved roadmap](docs/superpowers/specs/2026-10-10-typed-extraction-and-devin-roadmap-design.md).
 
 _NFA. DYOR. Built in the open._
