@@ -1,6 +1,6 @@
 # D0xed Architect: typed extraction, evaluation, and DEVin roadmap
 
-**Status:** Design for user review; no typed extractor or DEVin deployment claimed.
+**Status:** Design approved by user; implementation plan pending review. No typed extractor or DEVin deployment claimed.
 **Date:** 2026-10-10
 **Branch at drafting:** `feat/sentinel-v0.5` (clean; main at `5f15df4`).
 
@@ -48,7 +48,7 @@ After the crawler's **initial build is finished**, package crawler, graph, code-
 
 DEVin should be reachable via Telegram so the user can send a contract, code, or a link to code and request debug/audit help. Before implementation: verify Looper identity and wallet on-chain; choose and authorize Telegram bot/account and audience; define input-size, repository-fetch, SSRF/robots, licensing, and secret-redaction policies; run code analysis in a sandbox with network/execution disabled by default; distinguish static findings from executed tests; require `file:line` + literal snippet + file/snippet hash for every code finding; cap model and x402 spending independently; secure against hostile code and page prompt injection; create lifecycle/deployment plan and end-to-end Telegram tests. Do **not** deploy, activate, connect a wallet, promise a finding, or create a Telegram bot as part of item 4.
 
-## Review questions
+## Approved decisions
 
-- Are the opt-in model fallback and conservative evidence rules the desired default for item 4?
-- Is the DEVin milestone placed at the right gate (after initial crawler build), with activation deferred until identity, Telegram access, and sandbox boundaries are verified?
+- Deterministic extraction is the default; model fallback is opt-in, budgeted, and limited to unresolved fields.
+- DEVin is deferred until after the initial crawler build. Before activation, resolve and verify Looper #706's contract and wallet ownership on-chain; the user notes that the Looper contract is already used by three running Loopers, but no contract address is assumed here.
