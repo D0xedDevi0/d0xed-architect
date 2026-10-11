@@ -29,8 +29,21 @@ D0xed Architect pays, and gets let in.
 ## Install
 
 ```bash
-uv venv .venv && uv pip install --python .venv/bin/python cryptography
+python3 -m venv .venv
+.venv/bin/python -m pip install .             # CLI: includes eth-account + cryptography
+.venv/bin/architect --help
+# Optional browser escalation and MCP server:
+.venv/bin/python -m pip install '.[all]'
+.venv/bin/python -m playwright install chromium
+# MCP stdio: .venv/bin/python -m architect.mcp_server
 ```
+
+`browser` and `mcp` are separately installable extras (`'.[browser]'`,
+`'.[mcp]'`); Chromium is not bundled in the wheel. HTTP-only crawling needs
+no Playwright. Payment remains opt-in and requires separate signer/cap setup;
+installation never authorizes a transaction. This is a tested wheel/sdist
+installation, **not** a PyPI release or production deployment.
+
 
 ## Use
 
