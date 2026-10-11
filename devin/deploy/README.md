@@ -34,10 +34,18 @@ install -m 0644 looper-devin.service /etc/systemd/system/looper-devin.service
 # plaintext file. Prompt for it; do not pass it on the command line.
 systemd-creds encrypt --name=telegram_token - /etc/credstore.encrypted/looper-devin.token
 
+# Optional: a GitHub PAT enables /audit + /debug on PRIVATE repos. Same pattern
+# (only needed if private-repo work is wanted; the bot works without it).
+systemd-creds encrypt --name=github_token - /etc/credstore.encrypted/looper-devin.github
+
 systemctl daemon-reload
 systemctl enable --now looper-devin.service
 systemctl status looper-devin.service --no-pager
 ```
+
+The unit ships `LoadCredentialEncrypted=telegram_token:…` and (commented)
+`LoadCredentialEncrypted=github_token:…`. Uncomment the `github_token` line and
+`chmod 600` the encrypted file once a PAT is provisioned.
 
 ## Verify
 
@@ -45,9 +53,11 @@ systemctl status looper-devin.service --no-pager
 - `journalctl -u looper-devin -n 50` → identity guard passed, no errors
 - DM the bot `/start` (after opening the chat) and `/help`
 - In the group, `/audit@DEVinlooperbot https://github.com/<owner>/<repo>`
+- `/debug@DEVinlooperbot https://github.com/<owner>/<repo>` and
+  `/map@DEVinlooperbot https://example.com`; `/doctor@DEVinlooperbot`
 
 ## Non-goals
 
 No spend, no wallet, no on-chain writes, no LLM prompt execution, and no shell
 execution of anything in an audited repository. This unit only serves Telegram
-and performs static, read-only inspection of public GitHub repositories.
+and performs static, read-only inspection of GitHub repositories.

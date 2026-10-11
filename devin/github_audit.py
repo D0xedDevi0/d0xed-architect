@@ -25,6 +25,24 @@ from architect.evidence import (Evidence, manifest_root, severity_counts,
 _REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 _SNIPPET_MAX = 200
+# The ONLY hosts a GitHub token may ever be sent to, and only as an
+# Authorization header. Anything else (logs, errors, findings) must stay clean.
+_TOKEN_HOSTS = frozenset({"api.github.com", "codeload.github.com"})
+
+
+def _auth_headers(url: str, token: str | None) -> dict | None:
+    """Build the Authorization header for a GitHub fetch, host-gated.
+
+    Returns None (no header) when there is no token or when the URL's host is
+    not one of the two token-accepting hosts. This is the single choke point
+    that guarantees a token is never sent to an unexpected host.
+    """
+    if not token:
+        return None
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    if host in _TOKEN_HOSTS:
+        return {"Authorization": f"Bearer {token}"}
+    return None
 
 
 class AuditDenied(Exception):
@@ -208,18 +226,25 @@ def inspect_tarball(data: bytes, owner: str, repo: str, ref: str,
 # ── orchestration ──────────────────────────────────────────────────────────
 
 def audit_public_repo(url: str, fetch, limits: AuditLimits | None = None,
-                      timeout: float = 60.0) -> AuditOutcome:
-    """Fetch (metadata + tarball) and statically inspect a public GitHub repo.
+                      timeout: float = 60.0, token: str | None = None) -> AuditOutcome:
+    """Fetch (metadata + tarball) and statically inspect a GitHub repo.
 
-    `fetch(url, timeout) -> Response` must return an object with `.status` and
-    `.body` (bytes). Any refusal becomes `AuditDenied`; unexpected errors are
-    collapsed to a generic refusal (no internal detail leaks to chat).
+    `fetch(url, timeout, headers=None) -> Response` must return an object with
+    `.status` and `.body` (bytes). `headers` is an optional dict of extra HTTP
+    headers (used to carry the Authorization header for private repos). Any
+    refusal becomes `AuditDenied`; unexpected errors are collapsed to a generic
+    refusal (no internal detail leaks to chat).
+
+    With a `token`, private repos become auditable — the token is sent ONLY as
+    an Authorization header to api.github.com/codeload.github.com and never
+    appears in any finding, report, or error string. Without a token, a private
+    repo is a clear refusal (404/403 -> AuditDenied).
     """
     limits = limits or AuditLimits()
     try:
         ref = parse_repo_url(url)
         meta_url = f"https://api.github.com/repos/{ref.owner}/{ref.repo}"
-        meta = fetch(meta_url, timeout)
+        meta = fetch(meta_url, timeout, _auth_headers(meta_url, token))
         if meta.status == 404:
             raise AuditDenied("repository not found or not public")
         if meta.status == 403:
@@ -237,7 +262,7 @@ def audit_public_repo(url: str, fetch, limits: AuditLimits | None = None,
 
         tar_url = (f"https://codeload.github.com/{ref.owner}/{ref.repo}/"
                    f"tar.gz/refs/heads/{default_branch}")
-        resp = fetch(tar_url, timeout)
+        resp = fetch(tar_url, timeout, _auth_headers(tar_url, token))
         if resp.status != 200:
             raise AuditDenied(f"repository archive unavailable (HTTP {resp.status})")
         if len(resp.body) > limits.max_total_bytes:

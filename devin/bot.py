@@ -14,8 +14,12 @@ from dataclasses import dataclass
 from .access import AccessDecision, Authorizer
 from .commands import COMMANDS, Command, parse_command
 from .config import Config
+from .crawl_cmd import MapDenied, MapLimits, site_map
+from .deep_audit import deep_repo_report
+from .doctor import render_doctor
 from .github_audit import AuditDenied, AuditLimits, audit_public_repo
-from .report import render_help, render_report, render_start
+from .report import (render_deep_report, render_help, render_report,
+                     render_site_map, render_start)
 
 TELEGRAM_API = "https://api.telegram.org"
 POLL_ERROR_BACKOFF = 2.0
@@ -34,12 +38,13 @@ class HandledResult:
 
 
 class DevinBot:
-    def __init__(self, config: Config, transport, github_fetch):
+    def __init__(self, config: Config, transport, github_fetch, public_fetch=None):
         self.config = config
         self.authorizer = Authorizer(config.allowed_user_ids,
                                      config.allowed_group_ids)
         self.transport = transport      # (url, method, body, timeout) -> Response
-        self.github_fetch = github_fetch  # (url, timeout) -> Response
+        self.github_fetch = github_fetch  # (url, timeout, headers=None) -> Response
+        self.public_fetch = public_fetch  # (url, timeout) -> Response (site map)
         self._backoff = 0.0
         # Live identity, adopted from getMe at startup; seeded from config so
         # group addressing can be unit-tested without a network round trip.
@@ -131,6 +136,11 @@ class DevinBot:
                            max_total_bytes=L.max_total_bytes,
                            max_findings=L.max_findings)
 
+    def _map_limits(self) -> MapLimits:
+        L = self.config.limits
+        return MapLimits(max_links=L.max_links, max_bytes=L.max_crawl_bytes,
+                         max_url_len=L.max_message_len)
+
     def handle_update(self, update: dict) -> HandledResult:
         uid = update.get("update_id") if isinstance(update, dict) else None
         decision = self.authorizer.decide(update)
@@ -167,6 +177,12 @@ class DevinBot:
             return HandledResult(uid, "replied", "help")
         if cmd.kind == "audit":
             return self._handle_audit(uid, cmd, decision)
+        if cmd.kind == "debug":
+            return self._handle_debug(uid, cmd, decision)
+        if cmd.kind == "map":
+            return self._handle_map(uid, cmd, decision)
+        if cmd.kind == "doctor":
+            return self._handle_doctor(uid, cmd, decision)
         # reject
         reason = cmd.error or "unknown command"
         self._reply(decision.chat_id, f"{reason}. Allowed: {' '.join(COMMANDS)}",
@@ -177,7 +193,8 @@ class DevinBot:
         try:
             outcome = audit_public_repo(cmd.arg, self.github_fetch,
                                         limits=self._audit_limits(),
-                                        timeout=self.config.limits.http_timeout)
+                                        timeout=self.config.limits.http_timeout,
+                                        token=self.config.github_token)
             self._reply(decision.chat_id,
                         render_report(outcome, max_len=self.config.limits.max_reply_len),
                         reply_to=decision.message_id, thread_id=decision.thread_id)
@@ -190,6 +207,62 @@ class DevinBot:
             self._reply(decision.chat_id, "audit failed.",
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", "audit-error")
+
+    def _handle_debug(self, uid, cmd: Command, decision: AccessDecision) -> HandledResult:
+        try:
+            outcome = deep_repo_report(cmd.arg, self.github_fetch,
+                                       limits=self._audit_limits(),
+                                       timeout=self.config.limits.http_timeout,
+                                       token=self.config.github_token)
+            self._reply(decision.chat_id,
+                        render_deep_report(outcome,
+                                           max_len=self.config.limits.max_reply_len),
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", f"debug:{outcome.owner}/{outcome.repo}")
+        except AuditDenied as e:
+            self._reply(decision.chat_id, f"debug refused: {str(e)[:300]}",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "debug-denied")
+        except Exception:
+            self._reply(decision.chat_id, "debug failed.",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "debug-error")
+
+    def _handle_map(self, uid, cmd: Command, decision: AccessDecision) -> HandledResult:
+        if self.public_fetch is None:
+            self._reply(decision.chat_id, "map unavailable.",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "map-unavailable")
+        try:
+            sm = site_map(cmd.arg, self.public_fetch, limits=self._map_limits(),
+                          timeout=self.config.limits.http_timeout)
+            self._reply(decision.chat_id,
+                        render_site_map(sm, max_len=self.config.limits.max_reply_len),
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", f"map:{sm.url}")
+        except MapDenied as e:
+            self._reply(decision.chat_id, f"map refused: {str(e)[:300]}",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "map-denied")
+        except Exception:
+            self._reply(decision.chat_id, "map failed.",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "map-error")
+
+    def _handle_doctor(self, uid, cmd: Command, decision: AccessDecision) -> HandledResult:
+        try:
+            wh = self._call("getWebhookInfo", None).get("result") or {}
+            text = render_doctor(
+                self.config, bot_id=self.bot_id, bot_username=self.bot_username,
+                webhook_url=(wh.get("url") or "") or None,
+                max_len=self.config.limits.max_reply_len)
+            self._reply(decision.chat_id, text,
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "doctor")
+        except TelegramError:
+            self._reply(decision.chat_id, "doctor failed.",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "doctor-error")
 
     # ── polling ─────────────────────────────────────────────────────────────
 

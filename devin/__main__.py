@@ -17,7 +17,8 @@ def main() -> int:
         raise SystemExit(f"config error: {e}") from e
     from . import transport
     from .bot import DevinBot
-    bot = DevinBot(config, transport.telegram_call, transport.github_fetch)
+    bot = DevinBot(config, transport.telegram_call, transport.github_fetch,
+                   transport.public_fetch)
     bot.run()
     return 0
 

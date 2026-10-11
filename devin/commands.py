@@ -1,20 +1,24 @@
-"""Bounded command parsing. Only /start, /help and /audit exist.
+"""Bounded command parsing.
 
-Anything else — unknown commands, plain text, oversized messages, extra
-arguments — is a `reject` and never reaches a handler. The allowed set is a
-single tuple so a handler cannot exist without a registration (see the bot
-dispatch table test).
+The allowed set is a single tuple so a handler cannot exist without a
+registration (see the bot dispatch-table test). Commands are /start /help
+(no arg), /audit /debug /map (one URL arg), and /doctor (no arg). Anything
+else — unknown commands, plain text, oversized messages, wrong arity — is a
+`reject` and never reaches a handler.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-COMMANDS = ("/start", "/help", "/audit")
+COMMANDS = ("/start", "/help", "/audit", "/debug", "/map", "/doctor")
+
+_NO_ARG = ("start", "help", "doctor")
+_ONE_ARG = ("audit", "debug", "map")
 
 
 @dataclass(frozen=True)
 class Command:
-    kind: str              # "start" | "help" | "audit" | "reject"
+    kind: str              # "start" | "help" | "audit" | "debug" | "map" | "doctor" | "reject"
     arg: str | None = None
     error: str | None = None
 
@@ -33,11 +37,11 @@ def parse_command(text: str | None, max_len: int) -> Command:
     if name not in COMMANDS:
         return Command("reject", error="unknown command")
     kind = name[1:]
-    if kind in ("start", "help"):
+    if kind in _NO_ARG:
         return Command(kind)
-    # /audit requires exactly one argument
+    # /audit /debug /map require exactly one argument
     if not rest:
-        return Command("reject", error="usage: /audit <github-url>")
+        return Command("reject", error=f"usage: /{kind} <url>")
     if len(rest.split()) != 1:
-        return Command("reject", error="usage: /audit <github-url>")
-    return Command("audit", arg=rest)
+        return Command("reject", error=f"usage: /{kind} <url>")
+    return Command(kind, arg=rest)

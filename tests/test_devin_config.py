@@ -4,10 +4,12 @@ import tempfile
 import unittest
 
 from devin.config import (BOT_ID_ENV, BOT_USERNAME_ENV, CREDENTIALS_DIR_ENV,
-                          CREDENTIAL_FILENAME, GROUPS_ENV, TOKEN_ENV, USERS_ENV,
-                          Config, ConfigError, load_config, resolve_token)
-from tests.devin_fixtures import (BOT_ID, BOT_USERNAME, FAKE_TOKEN, GROUP_ID,
-                                  USER_ID)
+                          CREDENTIAL_FILENAME, GITHUB_CREDENTIAL_FILENAME,
+                          GITHUB_TOKEN_ENV, GROUPS_ENV, TOKEN_ENV, USERS_ENV,
+                          Config, ConfigError, load_config, resolve_github_token,
+                          resolve_token)
+from tests.devin_fixtures import (BOT_ID, BOT_USERNAME, FAKE_GITHUB_TOKEN,
+                                  FAKE_TOKEN, GROUP_ID, USER_ID)
 
 
 class TestConfig(unittest.TestCase):
@@ -91,6 +93,32 @@ class TestCredentialDir(unittest.TestCase):
     def test_missing_credential_dir_falls_back(self):
         env = {CREDENTIALS_DIR_ENV: "/nonexistent/dir", TOKEN_ENV: FAKE_TOKEN}
         self.assertEqual(resolve_token(env), FAKE_TOKEN)
+
+
+class TestGithubToken(unittest.TestCase):
+    """Optional GitHub token: same resolution order as the bot token, and it
+    must never appear in a repr (or anywhere a log could capture)."""
+
+    def test_absent_is_none_and_private_repos_stay_refused(self):
+        cfg = load_config({TOKEN_ENV: FAKE_TOKEN, USERS_ENV: str(USER_ID)})
+        self.assertIsNone(cfg.github_token)
+
+    def test_reads_from_env(self):
+        cfg = load_config({TOKEN_ENV: FAKE_TOKEN, USERS_ENV: str(USER_ID),
+                           GITHUB_TOKEN_ENV: FAKE_GITHUB_TOKEN})
+        self.assertEqual(cfg.github_token, FAKE_GITHUB_TOKEN)
+
+    def test_credential_dir_preferred_over_env(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(os.path.join(d, GITHUB_CREDENTIAL_FILENAME), "w") as fh:
+                fh.write(FAKE_GITHUB_TOKEN + "\n")
+            env = {CREDENTIALS_DIR_ENV: d, GITHUB_TOKEN_ENV: "ghp_" + "Z" * 36}
+            self.assertEqual(resolve_github_token(env), FAKE_GITHUB_TOKEN)
+
+    def test_repr_omits_github_token(self):
+        cfg = load_config({TOKEN_ENV: FAKE_TOKEN, USERS_ENV: str(USER_ID),
+                           GITHUB_TOKEN_ENV: FAKE_GITHUB_TOKEN})
+        self.assertNotIn(FAKE_GITHUB_TOKEN, repr(cfg))
 
 
 if __name__ == "__main__":

@@ -9,13 +9,15 @@ from tests.devin_fixtures import (BOT_ID, BOT_USERNAME, FAKE_TOKEN, GROUP_ID,
                                   build_tarball, dm_update, group_update)
 
 
-def make_bot(gh=None, tg=None, groups=(GROUP_ID,)):
+def make_bot(gh=None, tg=None, groups=(GROUP_ID,), github_token=None,
+             public_fetch=None):
     cfg = Config(token=FAKE_TOKEN, allowed_user_ids=(USER_ID,),
                  allowed_group_ids=groups, limits=Limits(),
-                 bot_id=BOT_ID, bot_username=BOT_USERNAME)
+                 bot_id=BOT_ID, bot_username=BOT_USERNAME,
+                 github_token=github_token)
     gh = gh or FakeGithub(tarball=build_tarball({"src/app.py": b"x = 1\n"}))
     tg = tg or FakeTelegram()
-    return DevinBot(cfg, tg, gh), gh, tg
+    return DevinBot(cfg, tg, gh, public_fetch), gh, tg
 
 
 class TestBotCommands(unittest.TestCase):
@@ -65,12 +67,63 @@ class TestBotCommands(unittest.TestCase):
         expectations = {
             "/start": "start",
             "/help": "help",
+            "/doctor": "doctor",
         }
         for cmd, expected in expectations.items():
             r = bot.handle_update(dm_update(1, USER_ID, cmd))
             self.assertEqual(r.detail, expected, cmd)
-        self.assertEqual(COMMANDS, ("/start", "/help", "/audit"))
-        # /audit is covered by test_audit_authorized + test_audit_denied_for_bad_url
+        self.assertEqual(COMMANDS,
+                         ("/start", "/help", "/audit", "/debug", "/map", "/doctor"))
+        # /audit and /debug are exercised here; /map needs an injected fetcher.
+        r = bot.handle_update(dm_update(2, USER_ID, "/audit https://github.com/a/b"))
+        self.assertTrue(r.detail.startswith("audit:"), r.detail)
+        r = bot.handle_update(dm_update(3, USER_ID, "/debug https://github.com/a/b"))
+        self.assertTrue(r.detail.startswith("debug:"), r.detail)
+
+
+class TestNewCommands(unittest.TestCase):
+    def test_debug_authorized(self):
+        bot, gh, tg = make_bot()
+        r = bot.handle_update(dm_update(1, USER_ID,
+                                        "/debug https://github.com/owner/repo"))
+        self.assertEqual(r.action, "replied")
+        self.assertTrue(r.detail.startswith("debug:owner/repo"))
+        self.assertIn("STATIC-ONLY", tg.sent[0]["text"])
+
+    def test_doctor_authorized(self):
+        bot, _, tg = make_bot()
+        r = bot.handle_update(dm_update(1, USER_ID, "/doctor"))
+        self.assertEqual(r.detail, "doctor")
+        text = tg.sent[0]["text"]
+        self.assertIn("self-diagnostics", text)
+        self.assertNotIn(FAKE_TOKEN, text)
+
+    def test_map_authorized(self):
+        from tests.devin_fixtures import FakePublic, html_page
+        pub = FakePublic({"https://example.com/": (
+            200, html_page("Example", ["/a"]), "text/html")})
+        bot, _, tg = make_bot(public_fetch=pub)
+        r = bot.handle_update(dm_update(1, USER_ID, "/map https://example.com/"))
+        self.assertEqual(r.action, "replied")
+        self.assertTrue(r.detail.startswith("map:"))
+        self.assertIn("site map", tg.sent[0]["text"])
+
+    def test_map_without_fetcher_is_unavailable(self):
+        bot, _, tg = make_bot(public_fetch=None)
+        r = bot.handle_update(dm_update(1, USER_ID, "/map https://example.com/"))
+        self.assertEqual(r.detail, "map-unavailable")
+
+    def test_group_debug_mention_runs(self):
+        bot, gh, tg = make_bot()
+        r = bot.handle_update(group_update(
+            9, USER_ID, GROUP_ID, f"/debug@{BOT_USERNAME} https://github.com/o/r"))
+        self.assertTrue(r.detail.startswith("debug:o/r"))
+
+    def test_group_doctor_bare_is_ignored(self):
+        bot, _, tg = make_bot()
+        r = bot.handle_update(group_update(9, USER_ID, GROUP_ID, "/doctor"))
+        self.assertEqual(r.action, "ignored")
+        self.assertEqual(tg.sent, [])
 
 
 class TestBotAccess(unittest.TestCase):

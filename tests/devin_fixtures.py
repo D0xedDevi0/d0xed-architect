@@ -12,6 +12,7 @@ import tarfile
 from architect.http import Response
 
 FAKE_TOKEN = "123456789:" + "A" * 35
+FAKE_GITHUB_TOKEN = "ghp_" + "A" * 36   # structurally valid, worthless placeholder
 USER_ID = 7898354400
 GROUP_ID = -1004351143165
 BOT_ID = 8803435794
@@ -46,30 +47,72 @@ def build_tarball(entries: dict) -> bytes:
 
 
 class FakeGithub:
-    """Injected GitHub transport: (url, timeout) -> Response."""
+    """Injected GitHub transport: (url, timeout, headers=None) -> Response."""
 
     def __init__(self, tarball=b"", branch="main", meta_status=200,
-                 tar_status=200, meta_extra=None):
+                 tar_status=200, meta_extra=None, private=False):
         self.tarball = tarball
         self.branch = branch
         self.meta_status = meta_status
         self.tar_status = tar_status
         self.meta_extra = meta_extra or {}
+        self.private = private
         self.calls: list[str] = []
+        self.headers_seen: list[tuple[str, dict | None]] = []
 
-    def __call__(self, url, timeout):
+    @staticmethod
+    def _auth(headers):
+        if not headers:
+            return None
+        for k, v in headers.items():
+            if k.lower() == "authorization":
+                return v
+        return None
+
+    def __call__(self, url, timeout, headers=None):
         self.calls.append(url)
+        self.headers_seen.append((url, headers))
+        auth = self._auth(headers)
         if "api.github.com" in url:
+            if self.private and not auth:
+                return make_response(404, b'{"message":"Not Found"}')
             if self.meta_status != 200:
                 return make_response(self.meta_status, b'{"message":"nope"}')
             info = {"default_branch": self.branch}
             info.update(self.meta_extra)
             return make_response(200, json.dumps(info).encode())
         if "codeload.github.com" in url:
+            if self.private and not auth:
+                return make_response(404, b"nope")
             if self.tar_status != 200:
                 return make_response(self.tar_status, b"nope")
             return make_response(200, self.tarball, content_type="application/gzip")
         return make_response(404, b"{}")
+
+
+class FakePublic:
+    """Injected public-web transport for /map: url -> (status, body, ctype)."""
+
+    def __init__(self, pages=None):
+        self.pages = pages or {}
+        self.calls: list[str] = []
+
+    def __call__(self, url, timeout, headers=None):
+        self.calls.append(url)
+        entry = self.pages.get(url)
+        if entry is None:
+            return make_response(404, b"")
+        status, body, ctype = entry
+        return make_response(status, body, ctype)
+
+
+def html_page(title, links):
+    """Build a minimal HTML page with <a href>s. links is a list of hrefs."""
+    body = f"<html><head><title>{title}</title></head><body>"
+    for href in links:
+        body += f'<a href="{href}">link</a>'
+    body += "</body></html>"
+    return body.encode()
 
 
 class FakeTelegram:

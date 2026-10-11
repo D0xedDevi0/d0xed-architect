@@ -23,8 +23,10 @@ USERS_ENV = "DEVIN_ALLOWED_USERS"
 GROUPS_ENV = "DEVIN_ALLOWED_GROUPS"
 BOT_ID_ENV = "DEVIN_BOT_ID"
 BOT_USERNAME_ENV = "DEVIN_BOT_USERNAME"
+GITHUB_TOKEN_ENV = "DEVIN_GITHUB_TOKEN"
 CREDENTIALS_DIR_ENV = "CREDENTIALS_DIRECTORY"
 CREDENTIAL_FILENAME = "telegram_token"
+GITHUB_CREDENTIAL_FILENAME = "github_token"
 
 # Telegram bot tokens are "<bot_id>:<secret>". Validate shape only — the value
 # is never stored in a repr, log, or error message.
@@ -45,6 +47,8 @@ class Limits:
     max_total_bytes: int = 4_000_000
     max_findings: int = 50
     max_reply_len: int = 3600
+    max_links: int = 50              # site-map internal links cap
+    max_crawl_bytes: int = 2_000_000  # site-map seed page byte cap
     http_timeout: float = 60.0   # > poll_timeout, so a long-poll read never 404s
     poll_timeout: int = 30       # getUpdates long-poll wait (seconds)
 
@@ -57,8 +61,9 @@ class Config:
     limits: Limits
     bot_id: int | None = None           # expected bot identity (pinned at startup)
     bot_username: str | None = None     # used for group @mention addressing
+    github_token: str | None = None     # optional; never printed (see __repr__)
 
-    def __repr__(self) -> str:  # deliberately omits the token
+    def __repr__(self) -> str:  # deliberately omits token AND github_token
         return (f"Config(allowed_user_ids={self.allowed_user_ids}, "
                 f"allowed_group_ids={self.allowed_group_ids}, "
                 f"bot_id={self.bot_id}, bot_username={self.bot_username!r}, "
@@ -99,6 +104,26 @@ def resolve_token(env=None) -> str:
     return (env.get(TOKEN_ENV) or "").strip()
 
 
+def resolve_github_token(env=None) -> str:
+    """Return the optional GitHub token from the systemd credential dir, else
+    the env var. Empty when not configured (private repos simply won't work).
+
+    Mirrors `resolve_token`: the credential file is preferred and is never
+    exposed in ``systemctl show``/``ps`` output. The value is never logged.
+    """
+    env = env if env is not None else os.environ
+    cred_dir = env.get(CREDENTIALS_DIR_ENV)
+    if cred_dir:
+        try:
+            with open(os.path.join(cred_dir, GITHUB_CREDENTIAL_FILENAME)) as fh:
+                tok = fh.read().strip()
+            if tok:
+                return tok
+        except OSError:
+            pass
+    return (env.get(GITHUB_TOKEN_ENV) or "").strip()
+
+
 def load_config(env=None) -> Config:
     """Load and validate configuration from `env` (defaults to os.environ)."""
     env = env if env is not None else os.environ
@@ -119,6 +144,8 @@ def load_config(env=None) -> Config:
         except ValueError:
             raise ConfigError(f"{BOT_ID_ENV} must be an integer") from None
     bot_username = (env.get(BOT_USERNAME_ENV) or "").strip() or None
+    github_token = resolve_github_token(env) or None
     return Config(token=token, allowed_user_ids=users,
                   allowed_group_ids=groups, limits=Limits(),
-                  bot_id=bot_id, bot_username=bot_username)
+                  bot_id=bot_id, bot_username=bot_username,
+                  github_token=github_token)

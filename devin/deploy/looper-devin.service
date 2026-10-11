@@ -19,6 +19,9 @@ Environment=DEVIN_BOT_ID=8803435794
 Environment=DEVIN_BOT_USERNAME=DEVinlooperbot
 # Token comes from an encrypted systemd credential, NOT the environment.
 LoadCredentialEncrypted=telegram_token:/etc/credstore.encrypted/looper-devin.token
+# Optional: enables /audit + /debug on PRIVATE repos. Uncomment (and chmod 600
+# the encrypted file) only once a GitHub PAT has been provisioned.
+#LoadCredentialEncrypted=github_token:/etc/credstore.encrypted/looper-devin.github
 Restart=always
 RestartSec=10
 UMask=0077
