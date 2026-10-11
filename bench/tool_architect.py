@@ -66,6 +66,8 @@ def run(url, max_pages, depth):
     escalations = 0
     cached_pages = 0
     md_chars = 0
+    marker = os.environ.get("BENCH_CONTENT_MARKER") or None
+    marker_pages = 0
 
     queue = [url]
     for links in (getattr(llms, "sections", {}) or {}).values():
@@ -138,7 +140,10 @@ def run(url, max_pages, depth):
                 cached_pages += 1
             p = _extract.extract(getattr(r, "text", "") or "", u)
             pages.append(u)
-            md_chars += len(_extract.to_markdown(p))
+            markdown = _extract.to_markdown(p)
+            md_chars += len(markdown)
+            if marker and marker in markdown:
+                marker_pages += 1
             graph.node("page", u, label=p.title or u)
             for href, _t in p.links:
                 tgt = urllib.parse.urljoin(u, href).split("#")[0]
@@ -160,6 +165,7 @@ def run(url, max_pages, depth):
         "graph_nodes": st.get("nodes", 0),
         "skipped": skipped,
         "markdown_chars": md_chars,
+        "content_marker_pages": marker_pages if marker else None,
         "robots_found": bool(robots.found),
         "llms_found": bool(llms.found),
         "escalations": escalations,
