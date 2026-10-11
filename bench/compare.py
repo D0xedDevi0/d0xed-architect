@@ -22,8 +22,11 @@ RUNNERS = [
 ]
 
 
-def run_one(name, python, script, url, max_pages, depth, timeout=900):
+def run_one(name, python, script, url, max_pages, depth, timeout=900, *,
+            env_overrides=None):
     env = dict(os.environ, PYTHONWARNINGS="ignore")
+    if env_overrides:
+        env.update(env_overrides)
     cmd = [python, script, url, str(max_pages), str(depth)]
     t0 = time.time()
     try:
@@ -31,13 +34,23 @@ def run_one(name, python, script, url, max_pages, depth, timeout=900):
                            env=env, cwd=ROOT)
     except subprocess.TimeoutExpired:
         return {"tool": name, "error": f"timeout after {timeout}s",
-                "wall_s": round(time.time() - t0, 1)}
+                "process_exit_code": None,
+                "driver_wall_s": round(time.time() - t0, 3)}
+    elapsed = round(time.time() - t0, 3)
+    meta = {"process_exit_code": p.returncode, "driver_wall_s": elapsed}
+    if p.returncode != 0:
+        # Never echo arbitrary stderr: it can contain credentials or page text.
+        return {"tool": name, "error": "runner exited nonzero", **meta}
     for line in (p.stdout or "").splitlines():
         if line.startswith("BENCH_JSON "):
-            return json.loads(line[len("BENCH_JSON "):])
-    tail = ((p.stderr or "") + (p.stdout or "")).strip().splitlines()[-6:]
-    return {"tool": name, "error": "no metrics emitted", "detail": tail,
-            "wall_s": round(time.time() - t0, 1)}
+            try:
+                result = json.loads(line[len("BENCH_JSON "):])
+                if not isinstance(result, dict):
+                    raise ValueError("metrics must be an object")
+            except (ValueError, TypeError):
+                return {"tool": name, "error": "invalid metrics JSON", **meta}
+            return {**result, **meta}
+    return {"tool": name, "error": "no metrics emitted", **meta}
 
 
 def main():
