@@ -17,6 +17,22 @@ MODES = (
 )
 
 
+def _crawl4ai_robots_absent(url: str) -> bool:
+    """Only run default-robots-off Crawl4AI when policy is explicitly absent.
+
+    This is deliberately conservative, not a replacement for per-hop guarding.
+    """
+    if ROOT not in sys.path:
+        sys.path.insert(0, ROOT)
+    from architect.http import load_robots
+    parsed = urlsplit(url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    try:
+        return not load_robots(origin, strict=True).found
+    except Exception:
+        return False
+
+
 def run_matrix(targets: list[dict], *, max_pages: int, depth: int,
                repetitions: int, output: str) -> dict:
     if not 1 <= max_pages <= 25 or not 0 <= depth <= 4 or not 1 <= repetitions <= 5:
@@ -40,12 +56,18 @@ def run_matrix(targets: list[dict], *, max_pages: int, depth: int,
         commit = None
     runs = []
     for target in targets:
+        crawl4ai_allowed = (_crawl4ai_robots_absent(target["url"])
+                            if any(mode == "crawl4ai-browser" for mode, *_ in MODES)
+                            else False)
         for rep in range(1, repetitions + 1):
             for mode, python, script, overrides in MODES:
                 env = {"BENCH_CONTENT_MARKER": target["content_marker"], **overrides}
                 if mode == "architect-http":
                     env["ARCH_MODE"] = "http"
-                if not os.path.isfile(python):
+                if mode == "crawl4ai-browser" and not crawl4ai_allowed:
+                    result = {"error": "Crawl4AI default robots posture requires explicit 404 policy",
+                              "process_exit_code": None, "driver_wall_s": None}
+                elif not os.path.isfile(python):
                     result = {"error": "runtime unavailable", "process_exit_code": None,
                               "driver_wall_s": None}
                 else:

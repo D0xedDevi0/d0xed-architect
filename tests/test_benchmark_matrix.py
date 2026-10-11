@@ -53,7 +53,7 @@ class MatrixTests(unittest.TestCase):
         targets = [{"name": "s", "url": "https://example.org", "kind": "static", "content_marker": "VISIBLE"}]
         mock_metrics = {"pages": 1, "content_marker_pages": 0, "process_exit_code": 0,
                         "wall_s": 1.2, "driver_wall_s": 1.4, "peak_rss_mb": 30}
-        with tempfile.TemporaryDirectory() as td, patch.object(matrix.os.path, "isfile", return_value=True), patch.object(matrix, "run_one", return_value=mock_metrics):
+        with tempfile.TemporaryDirectory() as td, patch.object(matrix.os.path, "isfile", return_value=True), patch.object(matrix, "_crawl4ai_robots_absent", return_value=True), patch.object(matrix, "run_one", return_value=mock_metrics):
             dest = str(Path(td) / "results.json")
             result = matrix.run_matrix(targets, max_pages=2, depth=0, repetitions=1, output=dest)
             self.assertEqual(len(result["runs"]), 3)
@@ -70,11 +70,23 @@ class MatrixTests(unittest.TestCase):
         import tempfile
         matrix = load("benchmark_matrix", "benchmark_matrix.py")
         targets = [{"name": "s", "url": "https://example.org", "kind": "static", "content_marker": "VISIBLE"}]
-        with tempfile.TemporaryDirectory() as td, patch.object(matrix.os.path, "isfile", return_value=True), patch.object(matrix, "run_one", return_value={"error": "runner exited nonzero", "process_exit_code": 1, "driver_wall_s": 0.1}):
+        with tempfile.TemporaryDirectory() as td, patch.object(matrix.os.path, "isfile", return_value=True), patch.object(matrix, "_crawl4ai_robots_absent", return_value=True), patch.object(matrix, "run_one", return_value={"error": "runner exited nonzero", "process_exit_code": 1, "driver_wall_s": 0.1}):
             result = matrix.run_matrix(targets, max_pages=2, depth=0, repetitions=1, output=str(Path(td) / "fail.json"))
         self.assertFalse(any(r["success"] for r in result["runs"]))
         self.assertTrue(all(r["content_present"] is None for r in result["runs"]))
         self.assertTrue(all("pages" not in r["metrics"] for r in result["runs"]))
+
+    def test_restrictive_robots_skips_default_crawl4ai(self):
+        import tempfile
+        matrix = load("benchmark_matrix", "benchmark_matrix.py")
+        target = [{"name": "s", "url": "https://example.org", "kind": "static", "content_marker": "VISIBLE"}]
+        with tempfile.TemporaryDirectory() as td, patch.object(matrix, "_crawl4ai_robots_absent", return_value=False), patch.object(matrix.os.path, "isfile", return_value=True), patch.object(matrix, "run_one", return_value={"pages": 1, "content_marker_pages": 1, "process_exit_code": 0}) as runner:
+            result = matrix.run_matrix(target, max_pages=1, depth=0, repetitions=1, output=str(Path(td) / "restrictive.json"))
+        self.assertEqual(runner.call_count, 2)
+        denied = result["runs"][2]
+        self.assertFalse(denied["success"])
+        self.assertIsNone(denied["content_present"])
+        self.assertIn("requires explicit 404", denied["metrics"]["error"])
 
     def test_local_fixture_guards_and_js_content(self):
         import tempfile
