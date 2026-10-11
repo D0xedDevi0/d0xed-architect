@@ -1,0 +1,40 @@
+{
+  "url": "https://baseddoom.com",
+  "max_pages": 1,
+  "depth": 0,
+  "results": [
+    {
+      "tool": "d0xed-architect+ladder",
+      "url": "https://baseddoom.com",
+      "pages": 1,
+      "wall_s": 2.11,
+      "bytes": 20167,
+      "edges": 0,
+      "graph_nodes": 1,
+      "skipped": 0,
+      "markdown_chars": 589,
+      "robots_found": true,
+      "llms_found": false,
+      "escalations": 1,
+      "cache": null,
+      "cached_pages": 0,
+      "peak_rss_mb": 51.7
+    },
+    {
+      "tool": "crawl4ai",
+      "url": "https://baseddoom.com",
+      "pages": 1,
+      "wall_s": 2.39,
+      "bytes": 20167,
+      "edges": 0,
+      "graph_nodes": 0,
+      "skipped": 0,
+      "markdown_chars": 292,
+      "robots_found": null,
+      "llms_found": null,
+      "peak_rss_mb": 129.5
+    }
+  ],
+  "run_label": "robots-gated-ladder-one-page",
+  "notes": "Single live run; timings vary. Architect applies robots checks to queued page URLs; Crawl4AI is run as its own baseline, not asserted to enforce identical policy."
+}

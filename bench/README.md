@@ -54,6 +54,20 @@ RSS is attributable and one tool's imports cannot inflate another's memory.
 4. **No anti-bot targets.** Neither tool is being tested against Cloudflare or
    DataDome. Crawl4AI (and any proxy-backed tool) would be the only option there.
 
+## Robots-gated one-page snapshots
+
+`results/robots-gated-d0xeddev-1page.json` and
+`results/robots-gated-baseddoom-1page.json` preserve separate post-fix runs
+(`ARCH_MODE=ladder`, `max_pages=1`, `depth=0`, cold process; no persistent
+cache). They are **single live observations**, not speed distributions or
+like-for-like robots-policy comparisons. Architect checks queued page paths
+against the discovered `robots.txt` before requesting them; Crawl4AI runs
+with its default robots setting. A discovered denied URL counts as skipped.
+
+**Known boundary:** this frontier check does not re-check automatic HTTP
+redirect destinations or rendered-browser navigation against robots policy.
+Do not describe these crawl paths as redirect-safe robots enforcement.
+
 ## Bugs this harness caught
 
 - **The `www` trap.** `d0xeddev.com` 307-redirects to `www.d0xeddev.com`. A

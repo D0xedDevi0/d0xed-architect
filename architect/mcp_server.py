@@ -154,7 +154,14 @@ def map_site(url: str, max_pages: int = 25, depth: int = 2) -> str:
     depth = max(0, min(int(depth), 4))
 
     for _ in range(depth + 1):
-        frontier = [u for u in queue if u not in seen][:max_pages * 4]
+        candidates = [u for u in queue if u not in seen][:max_pages * 4]
+        frontier = []
+        for u in candidates:
+            if not robots.can_fetch(urllib.parse.urlsplit(u).path or "/"):
+                seen.add(u)
+                skipped.append({"url": u, "reason": "robots.txt disallow"})
+                continue
+            frontier.append(u)
         if not frontier or len(pages) >= max_pages:
             break
         nxt = []

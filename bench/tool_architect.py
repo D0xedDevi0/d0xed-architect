@@ -74,7 +74,14 @@ def run(url, max_pages, depth):
     graph = Graph(":memory:")
 
     for _ in range(depth + 1):
-        frontier = [u for u in queue if u not in seen][: max_pages * 4]
+        candidates = [u for u in queue if u not in seen][: max_pages * 4]
+        frontier = []
+        for u in candidates:
+            if not robots.can_fetch(urllib.parse.urlsplit(u).path or "/"):
+                seen.add(u)
+                skipped += 1
+                continue
+            frontier.append(u)
         if not frontier or len(pages) >= max_pages:
             break
         nxt = []

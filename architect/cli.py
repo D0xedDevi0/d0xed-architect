@@ -71,7 +71,14 @@ def cmd_crawl(args) -> int:
     graph = Graph(args.graph or ":memory:")
 
     for _depth in range(args.depth + 1):
-        frontier = [u for u in queue if u not in seen][:args.max_pages * 4]
+        candidates = [u for u in queue if u not in seen][:args.max_pages * 4]
+        frontier = []
+        for u in candidates:
+            if not robots.can_fetch(urllib.parse.urlsplit(u).path or "/"):
+                seen.add(u)
+                print(f"[architect] robots denied {u}", file=sys.stderr)
+                continue
+            frontier.append(u)
         if not frontier:
             break
         next_queue = []

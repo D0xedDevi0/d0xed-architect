@@ -1,0 +1,40 @@
+{
+  "url": "https://d0xeddev.com",
+  "max_pages": 1,
+  "depth": 0,
+  "results": [
+    {
+      "tool": "d0xed-architect+ladder",
+      "url": "https://d0xeddev.com",
+      "pages": 1,
+      "wall_s": 0.2,
+      "bytes": 27938,
+      "edges": 10,
+      "graph_nodes": 1,
+      "skipped": 3,
+      "markdown_chars": 855,
+      "robots_found": true,
+      "llms_found": true,
+      "escalations": 0,
+      "cache": null,
+      "cached_pages": 0,
+      "peak_rss_mb": 35.7
+    },
+    {
+      "tool": "crawl4ai",
+      "url": "https://d0xeddev.com",
+      "pages": 1,
+      "wall_s": 1.86,
+      "bytes": 137757,
+      "edges": 18,
+      "graph_nodes": 0,
+      "skipped": 0,
+      "markdown_chars": 20041,
+      "robots_found": null,
+      "llms_found": null,
+      "peak_rss_mb": 129.5
+    }
+  ],
+  "run_label": "robots-gated-ladder-one-page",
+  "notes": "Single live run; timings vary. Architect applies robots checks to queued page URLs; Crawl4AI is run as its own baseline, not asserted to enforce identical policy."
+}
