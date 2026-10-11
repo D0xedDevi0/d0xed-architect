@@ -15,15 +15,19 @@ export PLAYWRIGHT_BROWSERS_PATH=/opt/data/.cache/ms-playwright   # installed for
 | Field | Meaning |
 |---|---|
 | `pages` | pages actually fetched and parsed |
-| `wall_s` | end-to-end seconds, including process + browser startup |
-| `bytes` | HTML bytes pulled off the wire |
+| `wall_s` | runner-internal elapsed seconds; excludes Python import, process startup, and Architect's pre-timer robots/llms discovery |
+| `driver_wall_s` | subprocess launch through exit, including imports and browser startup |
+| `content_marker_pages` | pages whose extracted markdown contains the literal target marker (not raw HTML) |
+| `process_exit_code` | actual runner exit status; nonzero output cannot count as metrics |
+| `bytes` | processed response-body byte length (not network transfer bytes; representations differ by tool) |
 | `edges` | internal links discovered (the graph) |
 | `markdown_chars` | total LLM-ready markdown produced |
 | `robots_found` / `llms_found` | whether access policy was read |
-| `peak_rss_mb` | peak resident memory of that process |
+| `peak_rss_mb` | Python runner's peak RSS only (`RUSAGE_SELF`); Chromium child processes excluded |
 
-Each tool runs in **its own interpreter** (`compare.py` shells out), so peak
-RSS is attributable and one tool's imports cannot inflate another's memory.
+Each tool runs in **its own interpreter** (`compare.py` shells out), so
+Python-runner RSS is separately attributable. The reported RSS excludes
+Chromium children and must not be compared as total browser memory.
 
 ## Why it is fair
 
@@ -53,6 +57,59 @@ RSS is attributable and one tool's imports cannot inflate another's memory.
    would not.
 4. **No anti-bot targets.** Neither tool is being tested against Cloudflare or
    DataDome. Crawl4AI (and any proxy-backed tool) would be the only option there.
+
+## Static + JS-dependent matrix (bounded observation)
+
+```bash
+export PLAYWRIGHT_BROWSERS_PATH=/opt/data/.cache/ms-playwright
+.venv/bin/python bench/benchmark_matrix.py bench/targets-static-js.json \
+  --max-pages 2 --depth 1 --repetitions 1 \
+  --output bench/results/2026-10-11-static-js-matrix.json
+```
+
+`results/2026-10-11-static-js-matrix.json` is the raw artifact; the command
+uses exclusive creation and will refuse to overwrite it. It records the exact
+commit at execution (`f00daa4de604d8c542624a83bd206a12fea31953`), timestamps,
+per-run exit codes, runner wall time, subprocess wall time, RSS, bytes, pages,
+and extracted-markdown marker presence. It was run against `example.com/`
+(robots: explicit 404, treated as absent) and `quotes.toscrape.com/js/`
+(robots: explicit 404, treated as absent). One cold subprocess per tool/mode,
+no persistent cache; six runs, one repetition each, capped at two pages and
+one link depth. The browser path on this host was
+`/opt/data/.cache/ms-playwright`. These sites may change between runs.
+
+Observed **within this small sample**:
+
+- Static example: Architect HTTP and ladder reached 1 page with the
+  `Example Domain` markdown marker; Crawl4AI reached 1 page without that exact
+  markdown marker. All are flagged as one-page frontiers, **not** throughput
+  evidence. The missing marker is an extraction difference, not proof that
+  Crawl4AI failed the page.
+- JS quotes: Architect HTTP reached 2 pages but lacked `Albert Einstein` in
+  extracted markdown; ladder reached 2 with the marker on 2 pages; Crawl4AI
+  reached 2 with the marker on both. This is the expected browser-content
+  distinction for this selected site, not a general accuracy estimate.
+- Subprocess elapsed (`driver_wall_s`): static Architect HTTP 0.485 s,
+  ladder 0.481 s, Crawl4AI 4.551 s; JS Architect HTTP 2.563 s,
+  ladder 5.614 s, Crawl4AI 5.582 s. A single cold run per cell is not a
+  distribution and cannot establish a speed winner. Runner `wall_s` excludes
+  interpreter imports; do not compare it as end-to-end latency.
+
+The matrix compares three **postures**, not identical engines: Architect
+HTTP-only, Architect HTTP-first/guarded browser escalation, and Crawl4AI's
+sequential `arun` browser loop. Architect strictly loads robots and guards
+queued/redirected/browser requests; Crawl4AI retains its separate default
+robots behavior (`check_robots_txt=False`). The published targets each returned
+an explicit 404 for `robots.txt` before execution. The matrix now refuses
+Crawl4AI mode when strict robots lookup returns a policy or an error; it does
+not silently run the default-robots-off browser against a restrictive site.
+This conservative seed-origin check is not a per-hop guard: Crawl4AI's
+independent default does not enforce our redirect/subrequest policy, and the
+matrix is not an arbitrary-target access-safety guarantee. Crawl4AI `arun_many` throughput is
+not measured. The marker is a literal substring in extracted markdown, so
+paraphrases, formatting differences, and content changes can produce false
+negatives; it is not a semantic extraction score. No anti-bot or paid x402
+sites were included. Typed extraction quality is evaluated separately below.
 
 ## Robots-gated one-page snapshots
 
