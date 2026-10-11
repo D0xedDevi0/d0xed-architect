@@ -28,6 +28,7 @@ from . import report as _report
 from . import swarm as _swarm
 from . import trust as _trust
 from . import x402 as _x402
+from .crawl_access import CrawlAccess
 from .graph import Graph
 
 # Receipts for paywalls settled during this process run.
@@ -41,7 +42,9 @@ def cmd_crawl(args) -> int:
     start = args.url if "://" in args.url else "https://" + args.url
     origin = "{0.scheme}://{0.netloc}".format(urllib.parse.urlsplit(start))
 
-    robots = _http.load_robots(origin, agent_id=args.signature_agent)
+    robots = _http.load_robots(origin, agent_id=args.signature_agent,
+                               strict=True)
+    access = CrawlAccess(origin, robots)
     llms = _http.load_llms_txt(origin, agent_id=args.signature_agent)
 
     print(f"[architect] robots.txt={'found' if robots.found else 'absent'} "
@@ -74,16 +77,16 @@ def cmd_crawl(args) -> int:
         candidates = [u for u in queue if u not in seen][:args.max_pages * 4]
         frontier = []
         for u in candidates:
-            if not robots.can_fetch(urllib.parse.urlsplit(u).path or "/"):
+            if not access.allows(u):
                 seen.add(u)
-                print(f"[architect] robots denied {u}", file=sys.stderr)
+                print(f"[architect] access denied {u}", file=sys.stderr)
                 continue
             frontier.append(u)
         if not frontier:
             break
         next_queue = []
         with cf.ThreadPoolExecutor(max_workers=args.concurrency) as ex:
-            futs = {ex.submit(_fetch_one, u, args): u for u in frontier}
+            futs = {ex.submit(_fetch_one, u, args, access): u for u in frontier}
             for fut in cf.as_completed(futs):
                 url = futs[fut]
                 if url in seen:
@@ -136,7 +139,7 @@ def cmd_crawl(args) -> int:
     return 0
 
 
-def _fetch_one(url: str, args):
+def _fetch_one(url: str, args, access: CrawlAccess | None = None):
     """Fetch one URL, settling a 402 when payment is armed and affordable."""
     policy = getattr(args, "_policy", None)
     if policy is not None and policy.enabled:
@@ -144,7 +147,8 @@ def _fetch_one(url: str, args):
             r = _x402.fetch_paid(
                 url, policy, account=getattr(args, "_account", None),
                 timeout=args.timeout,
-                headers=_http._identity_headers(args.signature_agent))
+                headers=_http._identity_headers(args.signature_agent),
+                redirect_guard=access.require if access is not None else None)
         except _x402.PaymentRequired as e:
             # Refusal is data, not a crash: record the gate and its reason.
             return 402, str(e)
@@ -157,7 +161,8 @@ def _fetch_one(url: str, args):
         return r["status"], None
 
     r = _http.fetch(url, timeout=args.timeout, agent_id=args.signature_agent,
-                    allow_402=False)
+                    allow_402=False,
+                    redirect_guard=access.require if access is not None else None)
     if r.status == 402:
         return 402, r.headers.get("x-price") or r.headers.get("price")
     if "html" not in (r.content_type or "") and "text" not in (r.content_type or ""):

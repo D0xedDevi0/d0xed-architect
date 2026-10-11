@@ -96,7 +96,7 @@ def _identity_headers(agent_id: str | None = None) -> dict:
 
 
 def fetch(url: str, timeout: int = DEFAULT_TIMEOUT, agent_id: str | None = None,
-          allow_402: bool = True, cache=None) -> Response:
+          allow_402: bool = True, cache=None, *, redirect_guard=None) -> Response:
     """Fetch a URL, optionally through an architect.cache.HttpCache.
 
     With a cache:
@@ -105,6 +105,8 @@ def fetch(url: str, timeout: int = DEFAULT_TIMEOUT, agent_id: str | None = None,
         If-None-Match / If-Modified-Since, so an unchanged page costs a 304
         round-trip instead of a full body.
     """
+    if redirect_guard is not None:
+        redirect_guard(url)  # even a fresh cache hit must be policy-eligible
     entry = cache.get(url) if cache is not None else None
     if cache is not None and entry is not None and entry.is_fresh():
         cache.note_hit(url, entry)
@@ -120,7 +122,19 @@ def fetch(url: str, timeout: int = DEFAULT_TIMEOUT, agent_id: str | None = None,
     req = urllib.request.Request(url, headers=headers)
     t0 = time.time()
     try:
-        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx()) as r:
+        if redirect_guard is None:
+            response = urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx())
+        else:
+            class GuardedRedirect(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, req, fp, code, msg, headers, newurl):
+                    redirect_guard(newurl)  # before the next network request
+                    return super().redirect_request(req, fp, code, msg,
+                                                    headers, newurl)
+
+            opener = urllib.request.build_opener(
+                urllib.request.HTTPSHandler(context=_ssl_ctx()), GuardedRedirect())
+            response = opener.open(req, timeout=timeout)
+        with response as r:
             raw = r.read(MAX_BYTES + 1)[:MAX_BYTES]
             if (r.headers.get("Content-Encoding") or "").lower() == "gzip":
                 try:
@@ -233,14 +247,35 @@ def parse_robots(text: str) -> Robots:
     return r
 
 
-def load_robots(base: str, agent_id: str | None = None) -> Robots:
+def load_robots(base: str, agent_id: str | None = None,
+                *, strict: bool = False) -> Robots:
     url = urllib.parse.urljoin(base, "/robots.txt")
     try:
-        resp = fetch(url, agent_id=agent_id)
+        if strict:
+            # The origin has no known rules yet. Keep policy discovery on the
+            # same origin; do not silently fetch a third-party redirect.
+            origin = urllib.parse.urlsplit(url)
+            def gate(target):
+                parsed = urllib.parse.urlsplit(target)
+                original_host = (origin.hostname or "").lower().removeprefix("www.")
+                target_host = (parsed.hostname or "").lower().removeprefix("www.")
+                original_port = origin.port or (443 if origin.scheme == "https" else 80)
+                target_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+                if (parsed.scheme != origin.scheme or
+                        target_host != original_host or
+                        target_port != original_port or
+                        parsed.username or parsed.password):
+                    raise FetchError("robots policy redirected off site")
+            resp = fetch(url, agent_id=agent_id, redirect_guard=gate)
+        else:
+            resp = fetch(url, agent_id=agent_id)
         if resp.status == 200:
             return parse_robots(resp.text)
+        if strict and resp.status != 404:
+            raise FetchError(f"robots policy unavailable: HTTP {resp.status}")
     except Exception:
-        pass
+        if strict:
+            raise
     return Robots()
 
 

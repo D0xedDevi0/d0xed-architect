@@ -143,7 +143,8 @@ def render(url: str, timeout: int = DEFAULT_TIMEOUT,
            wait_until: str = "domcontentloaded",
            settle_ms: int = 350,
            user_agent: str = UA,
-           max_bytes: int = 4_000_000) -> Response:
+           max_bytes: int = 4_000_000,
+           request_guard=None) -> Response:
     """Fetch `url` through a real browser and return the post-JS DOM.
 
     Returns a normal Response (so callers need no special case), with
@@ -159,8 +160,45 @@ def render(url: str, timeout: int = DEFAULT_TIMEOUT,
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             try:
-                ctx = browser.new_context(user_agent=user_agent)
+                context_options = {"user_agent": user_agent}
+                if request_guard is not None:
+                    context_options["service_workers"] = "block"
+                ctx = browser.new_context(**context_options)
                 page = ctx.new_page()
+                if request_guard is not None:
+                    request_guard(url)
+                    # Playwright route() does NOT intercept HTTP redirect hops.
+                    # CDP Fetch.requestPaused does: enforce policy before each
+                    # navigation, redirect, and browser subrequest.
+                    session = ctx.new_cdp_session(page)
+                    def gate(event):
+                        request_id = event["requestId"]
+                        try:
+                            request_guard(event["request"]["url"])
+                        except Exception:
+                            session.send("Fetch.failRequest", {
+                                "requestId": request_id,
+                                "errorReason": "BlockedByClient"})
+                            return
+                        session.send("Fetch.continueRequest", {
+                            "requestId": request_id})
+                    session.on("Fetch.requestPaused", gate)
+                    session.send("Fetch.enable", {"patterns": [
+                        {"urlPattern": "*", "requestStage": "Request"}]})
+                    # A popup's first request may occur before a page-level
+                    # CDP session exists. Never allow secondary pages in a
+                    # single-page render; context routing catches that start.
+                    def block_popups(route):
+                        try:
+                            owner = route.request.frame.page
+                        except Exception:
+                            route.abort("blockedbyclient")
+                            return
+                        if owner != page:
+                            route.abort("blockedbyclient")
+                        else:
+                            route.continue_()
+                    ctx.route("**/*", block_popups)
                 resp = page.goto(url, timeout=timeout * 1000,
                                  wait_until=wait_until)
                 if settle_ms:

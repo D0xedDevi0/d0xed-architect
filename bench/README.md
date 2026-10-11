@@ -64,9 +64,20 @@ like-for-like robots-policy comparisons. Architect checks queued page paths
 against the discovered `robots.txt` before requesting them; Crawl4AI runs
 with its default robots setting. A discovered denied URL counts as skipped.
 
-**Known boundary:** this frontier check does not re-check automatic HTTP
-redirect destinations or rendered-browser navigation against robots policy.
-Do not describe these crawl paths as redirect-safe robots enforcement.
+Architect's crawl paths now check queued URLs and HTTP redirect hops against
+per-origin rules before fetching; HTTP cache hits are gated too. The paid
+transport uses the same per-hop guard. In ladder mode, Chromium's CDP request
+interception gates page redirects, script navigation, and subrequests; service
+workers and secondary pages are blocked during guarded renders. Local-server
+tests assert forbidden destinations receive zero HTTP/browser requests.
+Crawl4AI retains its independent default robots setting, so the archived
+one-page snapshots are **pre-redirect-fix**, not evidence of new timings.
+
+**Scope:** this is crawl-path access enforcement, not a claim of general
+browser isolation or an SSRF-safe arbitrary-URL fetch API. Crawl entry points
+fail closed when the initial robots policy is unavailable (except an explicit
+404), and they require both starting-site and redirect-origin rules to allow a
+page. Ambiguous dot-segment and slash encodings are denied rather than guessed.
 
 ## Bugs this harness caught
 

@@ -24,6 +24,7 @@ from architect import extract as _extract   # noqa: E402
 from architect import escalate as _esc      # noqa: E402
 from architect import http as _http         # noqa: E402
 from architect.cache import HttpCache       # noqa: E402
+from architect.crawl_access import CrawlAccess  # noqa: E402
 from architect.graph import Graph           # noqa: E402
 
 LADDER = (os.environ.get("ARCH_MODE") or "").lower() == "ladder"
@@ -52,7 +53,8 @@ def run(url, max_pages, depth):
     u0 = urllib.parse.urlsplit(url)
     origin = f"{u0.scheme}://{u0.netloc}"
     same = _host(url)
-    robots = _http.load_robots(origin)
+    robots = _http.load_robots(origin, strict=True)
+    access = CrawlAccess(origin, robots)
     llms = _http.load_llms_txt(origin)
 
     t0 = time.time()
@@ -77,7 +79,7 @@ def run(url, max_pages, depth):
         candidates = [u for u in queue if u not in seen][: max_pages * 4]
         frontier = []
         for u in candidates:
-            if not robots.can_fetch(urllib.parse.urlsplit(u).path or "/"):
+            if not access.allows(u):
                 seen.add(u)
                 skipped += 1
                 continue
@@ -88,7 +90,8 @@ def run(url, max_pages, depth):
 
         fetched = []
         with cf.ThreadPoolExecutor(max_workers=6) as ex:
-            futs = {ex.submit(_http.fetch, u, 15, None, True, CACHE): u
+            futs = {ex.submit(_http.fetch, u, 15, None, True, CACHE,
+                              redirect_guard=access.require): u
                     for u in frontier}
             for fut in cf.as_completed(futs):
                 try:
@@ -109,7 +112,7 @@ def run(url, max_pages, depth):
                 if not BUDGET.spend():
                     continue
                 try:
-                    rr = _esc.render(u, timeout=25)
+                    rr = _esc.render(u, timeout=25, request_guard=access.require)
                 except Exception:
                     continue
                 rr.escalation_reason = ",".join(verdict.reasons)

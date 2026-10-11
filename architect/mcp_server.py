@@ -23,6 +23,7 @@ from architect import http as _http
 from architect import limiter as _limit
 from architect import nodes as _nodes
 from architect import typed as _typed
+from architect.crawl_access import CrawlAccess
 from architect.graph import Graph
 
 srv = MCPServer("d0xed-architect")
@@ -128,7 +129,8 @@ def map_site(url: str, max_pages: int = 25, depth: int = 2) -> str:
 
     origin = _origin(url)
     start = url if "://" in url else "https://" + url
-    robots = _http.load_robots(origin)
+    robots = _http.load_robots(origin, strict=True)
+    access = CrawlAccess(origin, robots)
     llms = _http.load_llms_txt(origin)
 
     # Per-host politeness + adaptive concurrency. If the origin declares a
@@ -157,9 +159,9 @@ def map_site(url: str, max_pages: int = 25, depth: int = 2) -> str:
         candidates = [u for u in queue if u not in seen][:max_pages * 4]
         frontier = []
         for u in candidates:
-            if not robots.can_fetch(urllib.parse.urlsplit(u).path or "/"):
+            if not access.allows(u):
                 seen.add(u)
-                skipped.append({"url": u, "reason": "robots.txt disallow"})
+                skipped.append({"url": u, "reason": "robots or origin denied"})
                 continue
             frontier.append(u)
         if not frontier or len(pages) >= max_pages:
@@ -169,7 +171,7 @@ def map_site(url: str, max_pages: int = 25, depth: int = 2) -> str:
         def _grab(u: str):
             st = limiter.acquire(u)
             try:
-                r = _http.fetch(u, 15)
+                r = _http.fetch(u, 15, redirect_guard=access.require)
             except Exception:
                 st.on_error()
                 raise
