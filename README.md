@@ -15,6 +15,7 @@ D0xed Architect pays, and gets let in.
 | Layer | Contract it honours |
 |---|---|
 | `http.py` | robots.txt · content-signals · llms.txt v2 · Web Bot Auth identity headers · HTTP 402 detection |
+| `escalate.py` | HTTP-first ladder: render JS shells in a real browser only when needed (`crawl --render`, `map_site(render=True)`), capped per run |
 | `extract.py` | HTML → title/headings/links/code/JSON-LD/emails, stdlib only |
 | `trust.py` | indirect prompt-injection firewall, zero-width/bidi/hidden-text detection, provenance score |
 | `graph.py` | SQLite site + module graph (nodes/edges, hubs, orphans) |
@@ -36,6 +37,9 @@ uv venv .venv && uv pip install --python .venv/bin/python cryptography
 ```bash
 # map a site (respects robots.txt, reads llms.txt first)
 .venv/bin/python -m architect.cli crawl https://d0xeddev.com --depth 2 --max-pages 30 --out site.md
+
+# render JS shells too (HTTP-first ladder, capped at 25 browser renders)
+.venv/bin/python -m architect.cli crawl https://d0xeddev.com --render --max-renders 25
 
 # audit a codebase
 .venv/bin/python -m architect.cli audit /path/to/repo --out audit.md --graph audit.db
