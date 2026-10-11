@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
-from architect import cli, http, mcp_server
+from architect import cli, escalate, http, mcp_server
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("architect_bench_runner", ROOT / "bench" / "tool_architect.py")
@@ -105,6 +105,83 @@ class CrawlRobotsGateTests(TestCase):
                       render.call_args.kwargs["request_guard"]):
             with self.assertRaises(http.FetchError):
                 guard(DENIED)
+
+    def test_fetch_smart_threads_redirect_and_request_guards(self):
+        shell = http.Response(url=ALLOWED, status=200, headers={},
+                              body=b'<html><div id="root"></div></html>', content_type="text/html")
+        with patch.object(http, "fetch", return_value=shell) as fetch, \
+             patch.object(escalate, "looks_js_dependent", return_value=SimpleNamespace(
+                 needs_render=True, reasons=["shell"])), \
+             patch.object(escalate, "render", return_value=shell) as render:
+            escalate.fetch_smart(ALLOWED, redirect_guard=self._access().require,
+                                 request_guard=self._access().require)
+        for kw, name in ((fetch.call_args.kwargs["redirect_guard"], "redirect_guard"),
+                         (render.call_args.kwargs["request_guard"], "request_guard")):
+            kw(ALLOWED)
+            with self.assertRaises(http.FetchError, msg=name):
+                kw(DENIED)
+
+    def test_cli_render_armed_escalates_shell_with_guard(self):
+        shell = http.Response(url=ALLOWED, status=200, headers={},
+                              body=b'<html><div id="root"></div></html>', content_type="text/html")
+        rendered = http.Response(url=ALLOWED, status=200, headers={},
+                                 body=b'<h1>Rendered by JS</h1>', content_type="text/html")
+        rendered.rendered = True
+        args = SimpleNamespace(timeout=2, signature_agent=None, _policy=None,
+                               _budget=escalate.EscalationBudget(max_renders=2))
+        with patch.object(cli._http, "fetch", return_value=shell), \
+             patch.object(cli._esc, "looks_js_dependent", return_value=SimpleNamespace(
+                 needs_render=True, reasons=["shell"])), \
+             patch.object(cli._esc, "render", return_value=rendered) as render:
+            status, text = cli._fetch_one(ALLOWED, args, self._access())
+        self.assertEqual(status, 200)
+        self.assertIn("Rendered by JS", text)
+        render.assert_called_once()
+        render.call_args.kwargs["request_guard"](ALLOWED)
+        with self.assertRaises(http.FetchError):
+            render.call_args.kwargs["request_guard"](DENIED)
+
+    def test_cli_default_never_renders(self):
+        shell = http.Response(url=ALLOWED, status=200, headers={},
+                              body=b'<html><div id="root"></div></html>', content_type="text/html")
+        args = SimpleNamespace(timeout=2, signature_agent=None, _policy=None,
+                               _budget=None)
+        with patch.object(cli._http, "fetch", return_value=shell), \
+             patch.object(cli._esc, "render") as render:
+            status, text = cli._fetch_one(ALLOWED, args, self._access())
+        self.assertEqual(status, 200)
+        self.assertIn("root", text)
+        render.assert_not_called()
+
+    def test_mcp_render_true_escalates_and_reports(self):
+        shell = http.Response(url=ALLOWED, status=200, headers={},
+                              body=b'<html><div id="root"></div></html>', content_type="text/html")
+        rendered = http.Response(url=ALLOWED, status=200, headers={},
+                                 body=b'<h1>Rendered by JS</h1>', content_type="text/html")
+        rendered.rendered = True
+        with patch.object(mcp_server._http, "load_robots", return_value=policies()), \
+             patch.object(mcp_server._http, "load_llms_txt", return_value=http.LlmsTxt(url=BASE + "/llms.txt")), \
+             patch.object(mcp_server._http, "fetch", return_value=shell), \
+             patch.object(mcp_server._esc, "looks_js_dependent", return_value=SimpleNamespace(
+                 needs_render=True, reasons=["shell"])), \
+             patch.object(mcp_server._esc, "render", return_value=rendered) as render:
+            result = json.loads(mcp_server.map_site(ALLOWED, max_pages=1, depth=0,
+                                                    render=True))
+        self.assertEqual(result["rendered"], 1)
+        render.assert_called_once()
+        with self.assertRaises(http.FetchError):
+            render.call_args.kwargs["request_guard"](DENIED)
+
+    def test_mcp_default_never_renders(self):
+        shell = http.Response(url=ALLOWED, status=200, headers={},
+                              body=b'<html><div id="root"></div></html>', content_type="text/html")
+        with patch.object(mcp_server._http, "load_robots", return_value=policies()), \
+             patch.object(mcp_server._http, "load_llms_txt", return_value=http.LlmsTxt(url=BASE + "/llms.txt")), \
+             patch.object(mcp_server._http, "fetch", return_value=shell), \
+             patch.object(mcp_server._esc, "render") as render:
+            result = json.loads(mcp_server.map_site(ALLOWED, max_pages=1, depth=0))
+        self.assertEqual("rendered" not in result, True)
+        render.assert_not_called()
 
     @staticmethod
     def _access():

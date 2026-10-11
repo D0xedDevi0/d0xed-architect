@@ -250,23 +250,30 @@ def fetch_smart(url: str, *, timeout: int = DEFAULT_TIMEOUT,
                 allow_render: bool = True,
                 force_render: bool = False,
                 budget: EscalationBudget | None = None,
-                wait_until: str = "domcontentloaded") -> tuple[Response, Verdict]:
+                wait_until: str = "domcontentloaded",
+                redirect_guard=None, request_guard=None) -> tuple[Response, Verdict]:
     """HTTP-first, escalating to a browser only when the page needs it.
 
     Returns (response, verdict) so callers get the real content *and* the
     reason it took the path it did — which is what makes crawl reports
     honest about how many pages actually needed rendering.
+
+    `redirect_guard` is enforced on the initial HTTP fetch and every redirect
+    hop; `request_guard` is enforced on the browser render and every browser
+    subrequest/redirect, so policy can't be bypassed by JS navigation.
     """
     from .http import fetch
 
-    resp = fetch(url, timeout=timeout, agent_id=agent_id)
+    resp = fetch(url, timeout=timeout, agent_id=agent_id,
+                 redirect_guard=redirect_guard)
 
     if force_render:
         if budget is not None and not budget.spend():
             return resp, Verdict(False, 0.0, ["budget-exhausted"],
                                  len(visible_text(resp.text or "")),
                                  len(resp.body or b""))
-        return render(url, timeout=timeout, wait_until=wait_until), \
+        return render(url, timeout=timeout, wait_until=wait_until,
+                      request_guard=request_guard), \
             Verdict(True, 99.0, ["forced"], 0, 0)
 
     verdict = looks_js_dependent(resp)
@@ -277,5 +284,6 @@ def fetch_smart(url: str, *, timeout: int = DEFAULT_TIMEOUT,
         verdict.reasons.append("budget-exhausted")
         return resp, verdict
 
-    rendered = render(url, timeout=timeout, wait_until=wait_until)
+    rendered = render(url, timeout=timeout, wait_until=wait_until,
+                      request_guard=request_guard)
     return rendered, verdict

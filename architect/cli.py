@@ -22,6 +22,7 @@ import urllib.parse
 from . import audit as _audit
 from . import auth as _auth
 from . import crypto as _crypto
+from . import escalate as _esc
 from . import extract as _extract
 from . import http as _http
 from . import report as _report
@@ -62,6 +63,14 @@ def cmd_crawl(args) -> int:
     else:
         args._policy = None
         args._account = None
+
+    # Opt-in JS-shell escalation: stay HTTP-first, render only pages that
+    # classify as shells, capped so one crawl can't melt the box.
+    args._budget = (_esc.EscalationBudget(max_renders=max(1, args.max_renders))
+                    if getattr(args, "render", False) else None)
+    if args._budget is not None:
+        print(f"[architect] 🖥️  render ladder armed: ≤{args.max_renders} "
+              f"browser renders", file=sys.stderr)
 
     queue = [start]
     if llms.found:
@@ -131,6 +140,11 @@ def cmd_crawl(args) -> int:
         print(f"[architect] 💳 settled {len(_PAID)} paywall(s), {spent:.6f} USDC "
               f"authorized (not broadcast)", file=sys.stderr)
 
+    if getattr(args, "_budget", None) is not None:
+        print(f"[architect] 🖥️  rendered {args._budget.used} page(s), "
+              f"skipped {args._budget.skipped} (budget exhausted)",
+              file=sys.stderr)
+
     graph.commit()
     stats = graph.stats()
     md = _report.crawl_report(start, robots, llms, pages, trusts, stats,
@@ -167,6 +181,22 @@ def _fetch_one(url: str, args, access: CrawlAccess | None = None):
         return 402, r.headers.get("x-price") or r.headers.get("price")
     if "html" not in (r.content_type or "") and "text" not in (r.content_type or ""):
         return 204, None
+
+    # JS-shell escalation (opt-in): classify the already-fetched body and
+    # render under the budget, reusing the access guard so JS navigation
+    # cannot reach a denied destination.
+    budget = getattr(args, "_budget", None)
+    if budget is not None:
+        verdict = _esc.looks_js_dependent(r)
+        if verdict.needs_render and budget.spend():
+            try:
+                rr = _esc.render(
+                    url, timeout=args.timeout,
+                    request_guard=access.require if access is not None else None)
+                rr.escalation_reason = "; ".join(verdict.reasons)
+                return 200, rr.text
+            except _esc.RenderError:
+                pass  # fall back to the HTTP body on any render failure
     return 200, r.text
 
 
@@ -561,6 +591,10 @@ def main(argv=None) -> int:
     c.add_argument("--concurrency", type=int, default=6)
     c.add_argument("--timeout", type=int, default=20)
     c.add_argument("--signature-agent", help="Web Bot Auth key-directory URL")
+    c.add_argument("--render", action="store_true",
+                   help="escalate JS shells to a real browser (HTTP-first ladder)")
+    c.add_argument("--max-renders", type=int, default=25,
+                   help="cap on browser renders per crawl (default 25)")
     payable(c)
     common(c)
     c.set_defaults(fn=cmd_crawl)

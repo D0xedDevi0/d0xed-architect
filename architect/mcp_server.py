@@ -17,6 +17,7 @@ import urllib.parse
 from mcp.server.mcpserver import MCPServer
 
 from architect import evidence as _ev
+from architect import escalate as _esc
 from architect import events as _events
 from architect import extract as _extract
 from architect import http as _http
@@ -119,9 +120,12 @@ def extract_typed(url: str, schema_json: str, use_llm: bool = False,
 
 
 @srv.tool()
-def map_site(url: str, max_pages: int = 25, depth: int = 2) -> str:
+def map_site(url: str, max_pages: int = 25, depth: int = 2,
+             render: bool = False, max_renders: int = 25) -> str:
     """Crawl a site (robots-aware) and return its page/edge graph.
 
+    Set `render=True` to escalate JS shells to a real browser (HTTP-first
+    ladder), capped at `max_renders` per crawl.
     Honours robots.txt and llms.txt, follows the sitemap when one is declared,
     and reports pages it skipped and why.
     """
@@ -132,6 +136,8 @@ def map_site(url: str, max_pages: int = 25, depth: int = 2) -> str:
     robots = _http.load_robots(origin, strict=True)
     access = CrawlAccess(origin, robots)
     llms = _http.load_llms_txt(origin)
+    budget = (_esc.EscalationBudget(max_renders=max(1, max_renders))
+              if render else None)
 
     # Per-host politeness + adaptive concurrency. If the origin declares a
     # Crawl-delay we honour it as a floor; otherwise we still space requests.
@@ -189,6 +195,18 @@ def map_site(url: str, max_pages: int = 25, depth: int = 2) -> str:
                 st.on_error()
             else:
                 st.on_success()
+            # JS-shell escalation (opt-in): classify the body and render under
+            # the budget, reusing the access guard for JS navigation.
+            if r.status == 200 and budget is not None:
+                verdict = _esc.looks_js_dependent(r)
+                if verdict.needs_render and budget.spend():
+                    try:
+                        rr = _esc.render(u, timeout=15,
+                                         request_guard=access.require)
+                        rr.escalation_reason = "; ".join(verdict.reasons)
+                        r = rr
+                    except _esc.RenderError:
+                        pass  # fall back to the HTTP body on any render failure
             return r
 
         with cf.ThreadPoolExecutor(max_workers=6) as ex:
@@ -223,7 +241,7 @@ def map_site(url: str, max_pages: int = 25, depth: int = 2) -> str:
         queue = nxt
 
     st = graph.stats()
-    return _j({
+    out = {
         "origin": origin,
         "robots_txt_found": bool(robots.found),
         "llms_txt_found": bool(llms.found),
@@ -235,7 +253,11 @@ def map_site(url: str, max_pages: int = 25, depth: int = 2) -> str:
         "skipped": skipped[:25],
         "politeness": limiter.stats(),
         "crawl_delay": robots.crawl_delay,
-    })
+    }
+    if budget is not None:
+        out["rendered"] = budget.used
+        out["rendered_skipped"] = budget.skipped
+    return _j(out)
 
 
 @srv.tool()
