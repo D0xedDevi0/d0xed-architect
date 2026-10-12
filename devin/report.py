@@ -123,6 +123,25 @@ def render_start(payload: str | None = None) -> str:
     return START_TEXT
 
 
+# A room that mentions DEVin without a command gets this, at most once a minute
+# per chat: enough to be discoverable, not enough to become a chatterbox.
+HINT_TEXT = (
+    "🟦 DEVin — Looper #706. Mention me WITH a command and I go to work:\n"
+    "/audit@%(u)s <github-url> — read a repo cold: secrets, receipts\n"
+    "/crawl@%(u)s <url> [depth] — walk a site, robots first\n"
+    "/sitemap@%(u)s <url> — sitemap.xml inventory\n"
+    "/map@%(u)s <url> — one page, same-origin links only\n"
+    "/bundle@%(u)s <url> — seal a repo into one encrypted file (DM only)\n"
+    "Reply to me, or send /help@%(u)s for the full menu.\n"
+    "Static only — I read your code, I never run it."
+)
+
+
+def render_hint(username: str | None = None) -> str:
+    """The addressed-but-commandless reply, built from the LIVE username."""
+    return HINT_TEXT % {"u": (username or "DEVinlooperbot").lstrip("@")}
+
+
 def render_link(username: str | None) -> str:
     """Shareable links. `username` is the live getMe username; nothing here is
     a credential and nothing here authorizes access — the allowlist still

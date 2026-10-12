@@ -11,9 +11,13 @@ User=looper-devin
 Group=looper-devin
 WorkingDirectory=/srv/looper-agents/devin/app
 ExecStart=/srv/looper-agents/devin/venv/bin/python -u -m devin
-# Fail-closed allowlist: only the owner's DM and the shared Loopers group.
+# Fail-closed allowlist: the owner's DM, plus every allowlisted ROOM (the room
+# is the principal — any member may use the bot once it is addressed).
+# QUOTE a multi-value Environment= line: systemd splits an unquoted value on
+# whitespace and silently drops everything after the first token
+# ("Invalid environment assignment, ignoring: -100...").
 Environment=DEVIN_ALLOWED_USERS=7898354400
-Environment=DEVIN_ALLOWED_GROUPS=-1004351143165
+Environment="DEVIN_ALLOWED_GROUPS=-1004351143165 -1003533071599"
 # Pin the expected bot identity; startup refuses any other token.
 Environment=DEVIN_BOT_ID=8803435794
 Environment=DEVIN_BOT_USERNAME=DEVinlooperbot

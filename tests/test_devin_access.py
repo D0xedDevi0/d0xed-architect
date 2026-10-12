@@ -29,6 +29,23 @@ class TestAccess(unittest.TestCase):
         self.assertFalse(d.ok)
         self.assertEqual(d.reason, "sender not allowlisted")
 
+    def test_other_member_of_allowlisted_group_is_authorized(self):
+        # The ROOM is the principal: any member may use the bot once they
+        # address it. Gating a room on the owner's user id made a group the
+        # bot had been added to look completely dead to everyone else.
+        d = self.auth.decide(group_update(8, 424242, GROUP_ID, "/help"))
+        self.assertTrue(d.ok)
+        self.assertEqual(d.reason, "group")
+
+    def test_bot_sender_in_allowlisted_group_reaches_the_bot_layer(self):
+        upd = group_update(9, 777000, GROUP_ID, "/help")
+        upd["message"]["from"]["is_bot"] = True
+        d = self.auth.decide(upd)
+        self.assertTrue(d.ok)
+        # Allowed here, but the bot layer still holds it to an addressed
+        # /command@self so sibling bots cannot start a conversation.
+        self.assertEqual(d.reason, "group-bot")
+
     def test_no_groups_configured_denies_group(self):
         auth = Authorizer([USER_ID], [])
         d = auth.decide(group_update(5, USER_ID, GROUP_ID, "/help"))

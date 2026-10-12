@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/D0xedDevi0/d0xed-architect/tree/main/tests"><img src="https://img.shields.io/badge/tests-306%20passed-00d4ff" alt="tests: 306 passed"></a>
+  <a href="https://github.com/D0xedDevi0/d0xed-architect/tree/main/tests"><img src="https://img.shields.io/badge/tests-317%20passed-00d4ff" alt="tests: 317 passed"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white" alt="python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3366cc" alt="license MIT"></a>
   <a href="https://t.me/DEVinlooperbot"><img src="https://img.shields.io/badge/Telegram-DEVinlooperbot-26A5E4?logo=telegram&logoColor=white" alt="Telegram DEVinlooperbot"></a>
@@ -61,6 +61,27 @@ flowchart LR
 | `/doctor` | Self-diagnostics |
 | `/link` | Deep links to add DEVin anywhere |
 
+## Using it in a group
+
+Add it to a room and **address it** — several bots share these rooms, so DEVin
+stays silent unless it is spoken to. An allowlisted room is authorized as a
+*room*: every member may use it, no per-person list required.
+
+| How you address it | Result |
+|---|---|
+| `/crawl@DEVinlooperbot https://example.com` | crawls the site |
+| `@DEVinlooperbot /audit https://github.com/o/r` | audits the repo |
+| `@DEVinlooperbot what can you do?` | replies with the menu |
+| reply to one of its messages | treated as addressed |
+| a bare `/crawl` with no mention | never delivered to the bot at all |
+
+Telegram's group privacy setting is the outer filter: with privacy ON (the
+default) it delivers only messages that mention the bot, address a
+`/command@self` to it, or reply to it. Expensive commands take a 15-second
+per-person cooldown in rooms so a public room cannot be used as a free crawler;
+DMs are never throttled. Private repos and sealing still need credentials and
+stay DM-only for code.
+
 ## What it looks like
 
 The test suite is the source of truth for what works:
@@ -70,7 +91,7 @@ $ cd d0xed-architect
 $ python3 -m unittest $(ls tests/test_devin_*.py | sed 's|/|.|; s|\.py$||')
 ........................................................................................................................................................................................................
 ----------------------------------------------------------------------
-Ran 306 tests in 7.429s
+Ran 317 tests in 8.074s
 
 OK
 ```

@@ -3,6 +3,11 @@
 Nothing outside the allowlist is ever answered with bot content. A denied
 private sender gets a single bounded "Access denied."; denied groups/channels
 are answered with silence (no amplification, no existence signal).
+
+A DM is authorized by the USER allowlist. A group/supergroup is authorized by
+the GROUP allowlist — the room is the principal, so any member may use the bot
+once they address it (the bot layer still requires the address). An allowlisted
+room that has not been allowlisted as a group is silence, not an error.
 """
 from __future__ import annotations
 
@@ -44,12 +49,19 @@ class Authorizer:
                     message_id=message_id, chat_type=chat_type,
                     thread_id=thread_id)
 
-        if user_id not in self.allowed_user_ids:
-            return AccessDecision(False, "sender not allowlisted", **base)
         if chat_type == "private":
+            if user_id not in self.allowed_user_ids:
+                return AccessDecision(False, "sender not allowlisted", **base)
             return AccessDecision(True, "dm", **base)
         if chat_type in ("group", "supergroup"):
-            if chat_id in self.allowed_group_ids:
-                return AccessDecision(True, "group", **base)
-            return AccessDecision(False, "group not allowlisted", **base)
+            if chat_id not in self.allowed_group_ids:
+                return AccessDecision(False, "group not allowlisted", **base)
+            # An allowlisted room is the principal: every member may use the bot
+            # (the bot layer still requires it to be addressed, so a room full of
+            # people cannot make it talk over everyone). A bot sender reaches the
+            # bot layer too, where only an addressed /command@self passes — that
+            # is the sibling-loop breaker.
+            if frm.get("is_bot"):
+                return AccessDecision(True, "group-bot", **base)
+            return AccessDecision(True, "group", **base)
         return AccessDecision(False, f"chat type not allowed: {chat_type}", **base)

@@ -18,8 +18,18 @@ like the other Looper companions on the VPS (`looper-glass`, `looper-mrbates`):
    if a webhook is set (long polling would silently receive nothing).
 2. `DEVIN_ALLOWED_USERS` / `DEVIN_ALLOWED_GROUPS` are the only chats served;
    everything else is denied (private) or silent (groups/channels).
-3. In a group the bot answers only when addressed (`/cmd@DEVinlooperbot` or a
-   reply to one of its messages) — it shares the room with other Looper bots.
+3. In a group the bot answers only when addressed — `/cmd@DEVinlooperbot`, an
+   `@DEVinlooperbot` mention (with or without a command after it), or a reply
+   to one of its messages — because it shares the room with other Looper bots.
+   An allowlisted ROOM is authorized as a room: every member may use it.
+4. Allowlists are read from `Environment=`; **quote any multi-value line**
+   (`Environment="DEVIN_ALLOWED_GROUPS=-1001 -1002"`). systemd splits an
+   unquoted value on whitespace and silently drops everything after the first
+   token, which looks exactly like a working config:
+
+   ```sh
+   systemctl show looper-devin -p Environment    # check what REALLY loaded
+   ```
 
 ## Install (on the VPS, as root)
 
@@ -68,6 +78,11 @@ closed until then.
   (refuses without the sealing key; refuses groups by design)
 - DM a `.zip` / `.tar.gz` **as a document** → static audit, plus the sealed
   bundle when the sealing key is provisioned
+- Live check of the group route against the real credentials (its group replies
+  are captured, never sent, so proving the route cannot spam the room):
+  `systemd-run --pipe --wait --collect --property=EnvironmentFile=/tmp/devin-env
+  --property=LoadCredentialEncrypted=telegram_token:/etc/credstore.encrypted/looper-devin.token
+  … venv/bin/python app/devin/scripts/live_group_check.py`
 - Offline proof scripts (passphrase read from the env, never printed):
   `DEVIN_LIVE_PW=… venv/bin/python devin/scripts/live_pack_check.py` and
   `DEVIN_LIVE_ALLOW_SECRETS=1 DEVIN_LIVE_PW=… venv/bin/python devin/scripts/live_upload_check.py`

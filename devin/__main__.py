@@ -23,7 +23,10 @@ def main() -> int:
     bot = DevinBot(config, transport.telegram_call, transport.github_fetch,
                    transport.public_fetch,
                    bundle_passphrase=resolve_bundle_passphrase(),
-                   file_get=transport.telegram_file_get)
+                   file_get=transport.telegram_file_get,
+                   # One journal line per update (no message text, no secrets),
+                   # so a silent bot is diagnosable instead of a mystery.
+                   verbose=True)
     bot.run()
     return 0
 
