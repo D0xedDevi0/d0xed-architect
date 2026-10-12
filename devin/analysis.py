@@ -30,6 +30,7 @@ from architect.evidence import (Evidence, manifest_root, severity_counts,
 from . import polyglot as pg
 
 _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+_DOC_EXTS = frozenset({".md", ".markdown", ".rst", ".txt", ".adoc", ".org"})
 _NON_CODE_LANGS = {"JSON", "JSON5", "YAML", "INI", "Dotenv", "TOML", "XML",
                    "Plist", "Properties", "Text", "Markdown", "Config",
                    "Protobuf", "GraphQL", "Thrift", "Template"}
@@ -342,6 +343,21 @@ _DEPS_BY_ECO = {
 }
 
 
+def _split_dep(dep: str) -> tuple[str, str]:
+    """Split "name@ver" / "name==ver" into (name, version).
+
+    Scoped packages (@scope/pkg@1.2.3) must split on the LAST '@', not the
+    first, or the scope is lost and the name comes out empty.
+    """
+    if "==" in dep:
+        name, _, ver = dep.partition("==")
+        return name.strip(), (ver.strip() or "*")
+    if "@" in dep[1:]:
+        name, ver = dep.rsplit("@", 1)
+        return name.strip(), (ver.strip() or "*")
+    return dep.strip(), "*"
+
+
 def _manifest_ecosystem(name: str) -> str | None:
     low = name.lower()
     eco = _MANIFEST_BY_BASENAME.get(low)
@@ -468,10 +484,7 @@ def analyze_tree(root: str, limits: AnalysisLimits | None = None,
                 eco, deps = _parse_manifest(fn, text)
                 rep.manifests[rel] = deps
                 for d in deps:
-                    name, _, ver = d.partition("@")
-                    if "==" in name:
-                        name, _, ver = name.partition("==")
-                    rep.sbom.append((eco, name, ver or "*"))
+                    rep.sbom.append((eco,) + _split_dep(d))
             if pg.LICENSE_FILES.match(fn) and len(rep.licenses) < _MAX_LICENSES:
                 spdx = "unknown"
                 for pat, tag in pg.LICENSE_SPDX_HINTS:
@@ -514,6 +527,12 @@ def analyze_tree(root: str, limits: AnalysisLimits | None = None,
                                  _mask(m.group(0)))
                     if f:
                         findings.append(f)
+
+            # Documentation and log files are scanned for SECRETS only: their
+            # prose trips code-shaped rules (http:// in a changelog, an IP in
+            # release notes) and would bury the real signal in noise.
+            if ext in _DOC_EXTS:
+                continue
 
             # ── findings: risk (common + language pack) ─────────────────
             for name, pat, score, why in pg.RISK_COMMON:

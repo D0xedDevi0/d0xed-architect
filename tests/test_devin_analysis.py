@@ -91,6 +91,13 @@ class TestPolyglotData(unittest.TestCase):
 
 
 class TestMasking(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="devmask-")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.root, ignore_errors=True)
+
     def test_secret_never_survives_masking(self):
         # NB: use an opaque blob. Repeated letters/digits that look like a
         # placeholder ("xxx", "example", "your_key", "test") are deliberately
@@ -105,6 +112,46 @@ class TestMasking(unittest.TestCase):
             masked = mask_line(line)
             self.assertNotIn(secret, masked, f"raw secret survived: {secret}")
             self.assertIn("chars)", masked)
+
+    def test_env_lookups_are_not_reported_as_hardcoded_secrets(self):
+        """`apiKey: process.env.X` is the CORRECT pattern, not a leak.
+
+        Reporting it burns trust in every other finding the bot prints, so
+        each of these must stay clean.
+        """
+        blob = "k7Qm2Zr9Tb4Xw1Lc6Nd8Pv3Hs5Jy0Gf"
+        write_tree(self.root, {
+            "hardhat.config.ts": (
+                "const c = {\n"
+                f"  apiKey: process.env.ALCHEMY_{blob},\n"
+                f"  secret: os.environ['APP_{blob}'],\n"
+                f"  token: getenv('GITHUB_{blob}'),\n"
+            ),
+            "deploy.yaml": (
+                f"password: ${{{{ secrets.DB_{blob} }}}}\n"
+                f"api_key: ${{{blob}_KEY}}\n"
+                f"token: $TOKEN_{blob}_VALUE\n"
+            ),
+            "app.env": f"API_KEY=${{{blob}_KEY}}\nSECRET_TOKEN=$SECRET_{blob}\n",
+            "setup.py": f'password = os.getenv("DB_{blob}")\n',
+        })
+        rep = analyze_tree(self.root)
+        leaked = [(f.rule, f.path, f.line)
+                  for f in rep.findings if f.rule.startswith("secret:")]
+        self.assertEqual(leaked, [],
+                         f"env lookups reported as secrets: {leaked}")
+
+    def test_real_literal_still_caught_next_to_env_lookups(self):
+        """The guard must not blind the rule to a genuine literal."""
+        blob = "k7Qm2Zr9Tb4Xw1Lc6Nd8Pv3Hs5Jy0Gf"
+        write_tree(self.root, {"conf.ts": (
+            f"  a: process.env.ALCHEMY_{blob},\n"
+            f'  api_key: "{blob}{blob}",\n'
+        )})
+        rep = analyze_tree(self.root)
+        self.assertTrue([f for f in rep.findings if f.rule == "secret:yaml_kv_secret"
+                         or f.severity == "critical"],
+                        "guard suppressed a genuine literal")
 
     def test_placeholder_shaped_values_are_not_treated_as_secrets(self):
         """A literal 'xxxxxxxx' style value must not be flagged as a secret."""

@@ -102,6 +102,13 @@ SECRET_ONLY_EXTS = frozenset({
 # ── secrets ────────────────────────────────────────────────────────────────
 # Ordered most-specific first so a narrow rule wins over a generic one.
 
+# A credential whose value is an ENVIRONMENT LOOKUP is the correct pattern,
+# not a leak. This guard is what keeps `apiKey: process.env.ALCHEMY_KEY` from
+# being reported as a hardcoded secret — false positives here are what make a
+# scanner untrustworthy.
+_ENVREF = (r"(?![\"']?(?:process\.env|import\.meta\.env|os\.environ|os\.getenv"
+           r"|getenv|System\.getenv|ENV\[|\$\{|\$[A-Za-z_]|%[A-Za-z_]+%|\{\{|<\?))")
+
 SECRET_RULES = [
     # ── keys & key material ──────────────────────────────────────────────
     ("private_key_pem", r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----[\s\S]{0,80}?[A-Za-z0-9+/]{40,}", 99),
@@ -214,13 +221,13 @@ SECRET_RULES = [
     # ── generic credential shapes ────────────────────────────────────────
     ("jwt", r"\beyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}", 70),
     ("basic_auth_url", r"\b(?:https?|ftp|mongodb(?:\+srv)?|postgres(?:ql)?|mysql|redis|amqp|mssql|clickhouse)://[^\s:/@\"']{1,64}:[^\s:/@\"']{4,64}@", 85),
-    ("conn_string_pw", r"(?i)\b(?:password|passwd|pwd|secret|token|api[_\-]?key|access[_\-]?key)\s*[:=]\s*[\"'][^\"'\s]{12,}[\"']", 70),
+    ("conn_string_pw", r"(?i)\b(?:password|passwd|pwd|secret|token|api[_\-]?key|access[_\-]?key)\s*[:=]\s*" + _ENVREF + r"[\"'][^\"'\s]{12,}[\"']", 70),
     ("jdbc_cred", r"jdbc:[a-z]+://[^\s;]{0,60};[^\s;]{0,40}(?:password|pwd)=[^\s;]{4,}", 85),
     ("bearer_literal", r"(?i)authorization\s*[:=]\s*[\"']Bearer\s+[A-Za-z0-9._\-]{20,}", 85),
     ("xml_credential", r"(?i)<(?:password|passwd|secret|apiKey|token)>[^<\s]{8,}</", 85),
-    ("yaml_kv_secret", r"(?im)^\s*(?:password|passwd|secret|api[_-]?key|token|private[_-]?key)\s*:\s*[\"']?[^\s\"'#]{12,}", 65),
+    ("yaml_kv_secret", r"(?im)^\s*(?:password|passwd|secret|api[_-]?key|token|private[_-]?key)\s*:\s*" + _ENVREF + r"[\"']?[^\s\"'#]{12,}", 65),
     ("docker_env_secret", r"(?im)^\s*ENV\s+\w*(?:PASSWORD|SECRET|TOKEN|KEY)\w*\s+\S{12,}", 70),
-    ("hardcoded_pw_call", r"(?i)(?:password|passwd|pwd)\s*=\s*[\"'][^\"']{8,}[\"']", 60),
+    ("hardcoded_pw_call", r"(?i)(?:password|passwd|pwd)\s*=\s*" + _ENVREF + r"[\"'][^\"']{8,}[\"']", 60),
     ("webhook_secret", r"(?i)webhook[_\- ]?secret\s*[:=]\s*[\"'][A-Za-z0-9_\-]{16,}", 75),
     ("slack_signing_secret", r"(?i)slack[_\- ]?signing[_\- ]?secret\S*\s*[:=]\s*[\"']?[0-9a-f]{32}", 80),
     ("encryption_key_32", r"(?i)(?:encryption|aes|cipher|fernet)[_\- ]?key\S*\s*[:=]\s*[\"']?[A-Za-z0-9+/=_\-]{32,}", 70),
@@ -541,7 +548,7 @@ RISK_LANG = {
     ],
     "INI": [],
     "Dotenv": [
-        ("env_secret_literal", r"(?im)^\s*(?:[A-Z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY)[A-Z0-9_]*)\s*=\s*\S{8,}", 55, "secret committed in a dotenv file"),
+        ("env_secret_literal", r"(?im)^\s*(?:[A-Z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY)[A-Z0-9_]*)\s*=\s*" + _ENVREF + r"\S{8,}", 55, "secret committed in a dotenv file"),
         ("env_aws_pair", r"(?im)^\s*AWS_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY)\s*=\s*\S{16,}", 70, "AWS credentials committed"),
     ],
     "Erlang": [
