@@ -82,6 +82,10 @@ per-person cooldown in rooms so a public room cannot be used as a free crawler;
 DMs are never throttled. Private repos and sealing still need credentials and
 stay DM-only for code.
 
+Proof of the whole route — the live check transcript and the service's own
+journal — is in
+[`docs/group-route-evidence.md`](docs/group-route-evidence.md).
+
 ## What it looks like
 
 The test suite is the source of truth for what works:
