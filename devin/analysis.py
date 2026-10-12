@@ -637,19 +637,43 @@ def pg_skip_dirs() -> set:
 
 # ── archive intake (traversal-safe, no execution, bounded) ─────────────────
 
-def _rel_path(member_name: str) -> str:
-    """Strip the single wrapping directory GitHub codeload tarballs add."""
-    name = member_name.replace("\\", "/")
+def safe_member(member_name: str) -> str | None:
+    """Validate an archive member path WITHOUT rewriting it.
+
+    This is the canonical guard: normalize what is safe to normalize, refuse
+    everything else. It does NOT strip a leading directory — callers that know
+    their archive has a wrapper root ask for that explicitly (`_safe_rel` with
+    `strip_root=True`), because silently stripping the first component turns
+    `src/app.py` into `app.py`: data loss and path collisions.
+    """
+    name = (member_name or "").replace("\\", "/")
     if name.startswith("./"):
         name = name[2:]
+    if not name or name.startswith("/") or "\\" in name:
+        return None
     parts = name.split("/")
-    if len(parts) > 1 and parts[0]:
-        return "/".join(parts[1:])
+    if any(seg in ("", ".", "..") for seg in parts):
+        return None
     return name
 
 
-def _safe_rel(member_name: str) -> str | None:
-    rel = _rel_path(member_name)
+def _rel_path(member_name: str) -> str:
+    """Strip the single wrapping directory GitHub codeload tarballs add."""
+    rel = safe_member(member_name)
+    if rel is None:
+        return ""
+    parts = rel.split("/")
+    if len(parts) > 1 and parts[0]:
+        return "/".join(parts[1:])
+    return rel
+
+
+def _safe_rel(member_name: str, strip_root: bool = True) -> str | None:
+    """Safe member path; strips one wrapper dir by default (GitHub layout)."""
+    if strip_root:
+        rel = _rel_path(member_name)
+    else:
+        rel = safe_member(member_name)
     if not rel or rel.startswith("/") or "\\" in rel:
         return None
     parts = rel.split("/")
@@ -665,12 +689,76 @@ def _skip_path(rel: str) -> bool:
                for seg in rel.split("/"))
 
 
+def extract_zip(data: bytes, limits: AnalysisLimits | None = None,
+                into: str | None = None, strip_root: bool = False
+                ) -> tuple[str | None, bool]:
+    """Extract a ZIP into a fresh temp dir, traversal-safe. (root, trunc).
+
+    Same guarantees as `extract_tarball`: symlinks and traversal names are
+    refused, caps are enforced, nothing is executed. `strip_root` defaults to
+    False because an uploaded archive is the user's own layout, not GitHub's.
+    """
+    import tempfile
+    import zipfile
+    limits = limits or AnalysisLimits()
+    root = into or tempfile.mkdtemp(prefix="devin-zip-")
+    truncated = False
+    total = files = 0
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
+    except Exception:
+        if into is None:
+            import shutil as _sh
+            _sh.rmtree(root, ignore_errors=True)
+        return None, False
+    try:
+        for info in zf.infolist():
+            if files >= limits.max_files or total >= limits.max_total_bytes:
+                truncated = True
+                break
+            # is_dir() entries carry no data; anything with an unusual mode or a
+            # symlink bit is skipped rather than materialized.
+            if info.is_dir() or (info.external_attr >> 16) & 0o170000 == 0o120000:
+                continue
+            rel = _safe_rel(info.filename, strip_root=strip_root)
+            if rel is None or _skip_path(rel):
+                continue
+            if info.file_size > limits.max_file_bytes:
+                truncated = True
+                continue
+            try:
+                raw = zf.read(info)               # zipfile checks CRC
+            except Exception:
+                truncated = True
+                continue
+            if len(raw) > limits.max_file_bytes:
+                truncated = True
+                continue
+            if total + len(raw) > limits.max_total_bytes:
+                truncated = True
+                break
+            dest = os.path.join(root, *rel.split("/"))
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as out:
+                out.write(raw)
+            files += 1
+            total += len(raw)
+    except Exception:
+        truncated = True
+    finally:
+        zf.close()
+    return root, truncated
+
+
 def extract_tarball(data: bytes, limits: AnalysisLimits | None = None,
-                    into: str | None = None) -> tuple[str | None, bool]:
+                    into: str | None = None, strip_root: bool = True
+                    ) -> tuple[str | None, bool]:
     """Extract a gzipped tarball into a fresh temp dir. Returns (root, trunc).
 
     Skips symlinks/hardlinks and traversal names, and enforces the file and
     byte caps so a hostile archive cannot fill the disk. Nothing is executed.
+    `strip_root=True` (default) drops the wrapper directory GitHub adds; pass
+    False for an archive that is the user's own layout.
     """
     import tarfile
     import tempfile
@@ -692,7 +780,7 @@ def extract_tarball(data: bytes, limits: AnalysisLimits | None = None,
                 break
             if not member.isfile() or member.issym() or member.islnk():
                 continue
-            rel = _safe_rel(member.name)
+            rel = _safe_rel(member.name, strip_root=strip_root)
             if rel is None or _skip_path(rel):
                 continue
             if member.size > limits.max_file_bytes:

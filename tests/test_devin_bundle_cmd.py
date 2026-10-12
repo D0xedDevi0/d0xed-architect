@@ -46,14 +46,15 @@ class DocTransport:
         return [c for c in self.calls if c["url"].endswith("/sendDocument")]
 
 
-def make_bot(passphrase=PW, transport=None):
+def make_bot(passphrase=PW, transport=None, github_token=None, github=None):
     from devin.bot import DevinBot
     from devin.config import Config, Limits
     cfg = Config(token=FAKE_TOKEN, allowed_user_ids=(USER_ID,),
                  allowed_group_ids=(GROUP_ID,), limits=Limits(),
-                 bot_id=None, bot_username=BOT_USERNAME)
+                 bot_id=None, bot_username=BOT_USERNAME,
+                 github_token=github_token)
     tg = transport or DocTransport()
-    gh = FakeGithub(tarball=build_tarball(SRC))
+    gh = github or FakeGithub(tarball=build_tarball(SRC))
     return DevinBot(cfg, tg, gh, None, bundle_passphrase=passphrase), tg
 
 
@@ -163,6 +164,52 @@ class TestBundleHappyPath(unittest.TestCase):
         blob = document_bytes(tg.documents()[0])
         self.assertNotIn(b"os.getpid", blob)
         self.assertNotIn(b"export const clamp", blob)
+
+
+class TestPrivateRepos(unittest.TestCase):
+    """Private code sets need a provisioned token, and the token must stay out
+    of everything the user sees."""
+
+    PRIVATE = "https://github.com/example/private-project"
+    TOKEN = "ghp_" + "P" * 36
+
+    def _private_github(self):
+        return FakeGithub(tarball=build_tarball(SRC), private=True)
+
+    def test_private_without_a_token_is_refused(self):
+        bot, tg = make_bot(github=self._private_github())
+        r = bot.handle_update(dm_update(1, USER_ID, f"/bundle {self.PRIVATE}"))
+        self.assertEqual(r.detail, "bundle-error")
+        self.assertEqual(tg.documents(), [])
+        body = tg.calls[-1]["body"].decode()
+        self.assertIn("not found or not public", body)
+
+    def test_private_with_a_token_is_sealed(self):
+        gh = self._private_github()
+        bot, tg = make_bot(github=gh, github_token=self.TOKEN)
+        r = bot.handle_update(dm_update(1, USER_ID, f"/bundle {self.PRIVATE}"))
+        self.assertEqual(r.detail, "bundle:2f")
+        blob = document_bytes(tg.documents()[0])
+        self.assertTrue(is_bundle(blob))
+
+    def test_token_never_reaches_the_bundle_or_the_chat(self):
+        gh = self._private_github()
+        bot, tg = make_bot(github=gh, github_token=self.TOKEN)
+        bot.handle_update(dm_update(1, USER_ID, f"/bundle {self.PRIVATE}"))
+        # the token is an Authorization header only
+        seen = [h for (_u, h) in gh.headers_seen if h]
+        self.assertTrue(any("Authorization" in h for h in seen))
+        for call in tg.calls:
+            self.assertNotIn(self.TOKEN.encode(), call["body"])
+        blob = document_bytes(tg.documents()[0])
+        self.assertNotIn(self.TOKEN.encode(), blob)
+
+    def test_private_tarball_is_not_reachable_without_auth(self):
+        """FakeGithub mirrors GitHub: the archive 404s without the header."""
+        gh = self._private_github()
+        from devin.github_audit import AuditDenied, fetch_public_tarball
+        with self.assertRaises(AuditDenied):
+            fetch_public_tarball(self.PRIVATE, gh, 5.0, None)
 
 
 class TestTransportContract(unittest.TestCase):

@@ -433,91 +433,8 @@ def deep_repo_report(url: str, fetch, limits: AuditLimits | None = None,
             raise AuditDenied("repository archive too large")
 
         root, truncated = _extract_tarball(resp.body, limits)
-
-        graph = Graph(":memory:")
-        res = audit_repo(root, graph=graph, max_files=limits.max_files)
-
-        report = DeepReport(owner=ref.owner, repo=ref.repo, ref=default_branch)
-        report.files_scanned = res.files_scanned
-        report.bytes_scanned = res.bytes_scanned
-        report.languages = dict(res.languages)
-        report.modules = res.modules
-        report.entrypoints = list(res.entrypoints)
-        report.truncated = truncated
-
-        # top-imported modules (destinations of "imports" edges, by count)
-        top = []
-        for dst, count in graph.hubs(_MAX_TOP_IMPORTS):
-            if dst.startswith("py:"):
-                top.append((dst[3:], count))
-            elif dst.startswith("pkg:"):
-                top.append((dst[4:], count))
-            else:
-                top.append((dst, count))
-        report.top_imports = top[:_MAX_TOP_IMPORTS]
-
-        # import cycles over project files
-        files = _walk_code_files(root)
-        report.cycles = _find_cycles(_import_edges(root, files))
-
-        _metadata_scan(root, report)
-
-        # ── polyglot engine pass over the SAME tree ───────────────────────
-        alimits = AnalysisLimits(
-            max_files=limits.max_files,
-            max_file_bytes=limits.max_file_bytes,
-            max_total_bytes=limits.max_total_bytes,
-            max_findings=limits.max_findings)
-        eng = analyze_tree(root, alimits)
-
-        cache: dict = {}
-        merged: list = []
-        seen: set = set()
-        for f in res.findings:
-            e = _to_evidence(root, f, cache)
-            if e is None:
-                continue
-            key = (e.rule, e.path, e.line, e.snippet_sha256)
-            if key in seen:
-                continue
-            seen.add(key)
-            merged.append(e)
-        for e in eng.findings:
-            key = (e.rule, e.path, e.line, e.snippet_sha256)
-            if key in seen:
-                continue
-            seen.add(key)
-            merged.append(e)
-        merged.sort(key=lambda e: (_SEV_RANK.get(e.severity, 9), e.path, e.line))
-        if len(merged) > limits.max_findings:
-            report.truncated = True
-            merged = merged[:limits.max_findings]
-
-        # engine metadata: richer languages, SBOM, hotspots, IaC, licenses
-        report.languages = dict(eng.languages) or report.languages
-        report.loc = eng.loc
-        report.sbom = list(eng.sbom)
-        report.hotspots = list(eng.hotspots)
-        report.licenses = list(eng.licenses)
-        report.iac = list(eng.iac)
-        report.lockfiles = list(eng.lockfiles)
-        report.suppressions = eng.suppressions
-        report.key_files = list(eng.key_files)
-        report.notes = list(eng.notes)
-        report.entrypoints = sorted(set(report.entrypoints)
-                                    | set(eng.entrypoints))[:40]
-        report.todo_count = max(report.todo_count, eng.todos)
-        report.fixme_count = max(report.fixme_count, eng.fixmes)
-        report.tests = sorted(set(report.tests) | set(eng.tests))[:_MAX_TESTS]
-        report.workflows = sorted(set(report.workflows)
-                                  | set(eng.ci))[:_MAX_WORKFLOWS]
-        for name, deps in eng.manifests.items():
-            report.manifests.setdefault(name, deps)
-        report.truncated = report.truncated or eng.truncated
-
-        report.findings = merged
-        report.manifest_root = manifest_root(merged)
-        return report
+        return deep_tree_report(root, limits, owner=ref.owner, repo=ref.repo,
+                                ref=default_branch, truncated=truncated)
     except AuditDenied:
         raise
     except safe_fetch.AccessDenied as e:
@@ -527,6 +444,103 @@ def deep_repo_report(url: str, fetch, limits: AuditLimits | None = None,
     finally:
         if root is not None:
             shutil.rmtree(root, ignore_errors=True)
+
+
+def deep_tree_report(root: str, limits: AuditLimits | None = None, *,
+                     owner: str = "upload", repo: str = "upload",
+                     ref: str = "", truncated: bool = False) -> DeepReport:
+    """Deep STATIC report for an ALREADY-EXTRACTED tree.
+
+    Split out of `deep_repo_report` so a tree can arrive from somewhere other
+    than a GitHub tarball (an uploaded archive, a local directory) and still get
+    exactly the same analysis, the same receipts, and the same rendering. The
+    caller owns `root` and is responsible for deleting it.
+    """
+    limits = limits or AuditLimits()
+    graph = Graph(":memory:")
+    res = audit_repo(root, graph=graph, max_files=limits.max_files)
+
+    report = DeepReport(owner=owner, repo=repo, ref=ref)
+    report.files_scanned = res.files_scanned
+    report.bytes_scanned = res.bytes_scanned
+    report.languages = dict(res.languages)
+    report.modules = res.modules
+    report.entrypoints = list(res.entrypoints)
+    report.truncated = truncated
+
+    # top-imported modules (destinations of "imports" edges, by count)
+    top = []
+    for dst, count in graph.hubs(_MAX_TOP_IMPORTS):
+        if dst.startswith("py:"):
+            top.append((dst[3:], count))
+        elif dst.startswith("pkg:"):
+            top.append((dst[4:], count))
+        else:
+            top.append((dst, count))
+    report.top_imports = top[:_MAX_TOP_IMPORTS]
+
+    # import cycles over project files
+    files = _walk_code_files(root)
+    report.cycles = _find_cycles(_import_edges(root, files))
+
+    _metadata_scan(root, report)
+
+    # ── polyglot engine pass over the SAME tree ───────────────────────
+    alimits = AnalysisLimits(
+        max_files=limits.max_files,
+        max_file_bytes=limits.max_file_bytes,
+        max_total_bytes=limits.max_total_bytes,
+        max_findings=limits.max_findings)
+    eng = analyze_tree(root, alimits)
+
+    cache: dict = {}
+    merged: list = []
+    seen: set = set()
+    for f in res.findings:
+        e = _to_evidence(root, f, cache)
+        if e is None:
+            continue
+        key = (e.rule, e.path, e.line, e.snippet_sha256)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(e)
+    for e in eng.findings:
+        key = (e.rule, e.path, e.line, e.snippet_sha256)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(e)
+    merged.sort(key=lambda e: (_SEV_RANK.get(e.severity, 9), e.path, e.line))
+    if len(merged) > limits.max_findings:
+        report.truncated = True
+        merged = merged[:limits.max_findings]
+
+    # engine metadata: richer languages, SBOM, hotspots, IaC, licenses
+    report.languages = dict(eng.languages) or report.languages
+    report.loc = eng.loc
+    report.sbom = list(eng.sbom)
+    report.hotspots = list(eng.hotspots)
+    report.licenses = list(eng.licenses)
+    report.iac = list(eng.iac)
+    report.lockfiles = list(eng.lockfiles)
+    report.suppressions = eng.suppressions
+    report.key_files = list(eng.key_files)
+    report.notes = list(eng.notes)
+    report.entrypoints = sorted(set(report.entrypoints)
+                                | set(eng.entrypoints))[:40]
+    report.todo_count = max(report.todo_count, eng.todos)
+    report.fixme_count = max(report.fixme_count, eng.fixmes)
+    report.tests = sorted(set(report.tests) | set(eng.tests))[:_MAX_TESTS]
+    report.workflows = sorted(set(report.workflows)
+                              | set(eng.ci))[:_MAX_WORKFLOWS]
+    for name, deps in eng.manifests.items():
+        report.manifests.setdefault(name, deps)
+    report.truncated = report.truncated or eng.truncated
+
+    report.findings = merged
+    report.manifest_root = manifest_root(merged)
+    return report
 
 
 def _walk_code_files(root: str) -> list[str]:

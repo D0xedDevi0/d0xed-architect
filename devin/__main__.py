@@ -22,7 +22,8 @@ def main() -> int:
     # under a default. Never printed, never logged.
     bot = DevinBot(config, transport.telegram_call, transport.github_fetch,
                    transport.public_fetch,
-                   bundle_passphrase=resolve_bundle_passphrase())
+                   bundle_passphrase=resolve_bundle_passphrase(),
+                   file_get=transport.telegram_file_get)
     bot.run()
     return 0
 

@@ -131,6 +131,21 @@ def _pin_fetch(url: str, timeout: float, headers: dict | None,
     raise TransportError("too many redirects")
 
 
+TELEGRAM_HOSTS = frozenset({TELEGRAM_HOST})
+
+
+def telegram_file_get(url: str, timeout: float) -> Response:
+    """Download a file from api.telegram.org ONLY (SSRF-pinned, size-capped).
+
+    Used for payments-free document intake: the URL is built by the bot from a
+    `file_path` that Telegram returned, and this function enforces the host so a
+    malicious/odd file_path can never redirect the fetch somewhere else. No
+    token header is sent (the token is already inside the URL path, and this
+    host is the only one allowed).
+    """
+    return _pin_fetch(url, timeout, None, TELEGRAM_HOSTS, frozenset())
+
+
 def github_fetch(url: str, timeout: float, headers: dict | None = None) -> Response:
     """GET a GitHub resource over the SSRF-pinned transport, allowlisted hosts
     only. An Authorization header (if present) is sent to api.github.com /

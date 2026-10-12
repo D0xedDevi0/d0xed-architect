@@ -37,7 +37,8 @@ import tarfile
 import time
 from dataclasses import dataclass, field
 
-from .analysis import AnalysisLimits, _safe_rel, _skip_path, analyze_tree, extract_tarball
+from .analysis import (AnalysisLimits, _skip_path, analyze_tree, extract_tarball,
+                       safe_member)
 from .crypto import IntegrityError, is_bundle, open_bundle, seal_bundle
 
 MANIFEST_NAME = "_devin/MANIFEST.json"
@@ -193,12 +194,17 @@ def _inner_tar(files: list, manifest: dict, audit: dict) -> bytes:
 
 def pack_github(url: str, fetch, passphrase: str, *, label: str = "",
                 limits: PackLimits | None = None, allow_secrets: bool = False,
-                timeout: float = 60.0) -> PackResult:
+                timeout: float = 60.0, token: str | None = None) -> PackResult:
     """Fetch a PUBLIC GitHub repo tarball and seal it.
 
     `fetch` is the caller's GitHub transport; it is allowlisted to
     api.github.com / codeload.github.com, so this cannot be pointed at an
-    arbitrary host. Private repos are deliberately out of scope on this path.
+    arbitrary host.
+
+    With `token`, a PRIVATE repo can be sealed too — the token travels only as
+    an Authorization header to the two allowlisted hosts and never enters the
+    bundle, the manifest, or an error string. Without a token a private repo is
+    a clean refusal, never a partial bundle.
 
     Mapped into a PackError so a caller that only knows about packaging still
     gets an honest refusal rather than an unhandled audit exception.
@@ -206,7 +212,7 @@ def pack_github(url: str, fetch, passphrase: str, *, label: str = "",
     from .github_audit import fetch_public_tarball
     L = limits or PackLimits()
     # Same resolution + branch validation as /audit; raises AuditDenied.
-    body, ref_name = fetch_public_tarball(url, fetch, timeout,
+    body, ref_name = fetch_public_tarball(url, fetch, timeout, token,
                                          max_bytes=L.max_tarball_bytes)
     return pack_tarball(body, passphrase,
                         label=label or ref_name.replace("/", "-"),
@@ -337,24 +343,16 @@ def pack_tarball(data: bytes, passphrase: str, **kw) -> PackResult:
 # open / verify
 # --------------------------------------------------------------------------- #
 def _safe_member(member_name: str) -> str | None:
-    """Validate a bundle member name WITHOUT rewriting it.
+    """Bundle member guard.
 
-    `analysis._safe_rel` is wrong for this job: it strips the first path
-    component, because GitHub codeload tarballs wrap everything in one
-    directory. Applying it to a bundle turns `src/app.py` into `app.py` and
-    `_devin/MANIFEST.json` into `MANIFEST.json` — silent data loss and path
-    collisions. So the bundle gets its own check: normalize what is safe to
-    normalize, refuse everything else.
+    Delegates to `analysis.safe_member`, which validates WITHOUT stripping the
+    first path component: `analysis._safe_rel` strips a wrapper dir (correct for
+    GitHub codeload tarballs) and applying that here would turn `src/app.py`
+    into `app.py` and `_devin/MANIFEST.json` into `MANIFEST.json` — silent data
+    loss and path collisions. Kept as a named alias so the intent stays visible
+    at the call sites.
     """
-    name = (member_name or "").replace("\\", "/")
-    if name.startswith("./"):
-        name = name[2:]
-    if not name or name.startswith("/") or "\\" in name:
-        return None
-    parts = name.split("/")
-    if any(seg in ("", ".", "..") for seg in parts):
-        return None
-    return name
+    return safe_member(member_name)
 
 
 def _safe_members(tf: tarfile.TarFile) -> list:

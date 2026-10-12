@@ -15,13 +15,16 @@ from .access import AccessDecision, Authorizer
 from .commands import COMMANDS, Command, parse_command
 from .config import Config
 from .crawl_cmd import MapDenied, MapLimits, site_map
-from .deep_audit import deep_repo_report
+from .analysis import AnalysisLimits
+from .deep_audit import deep_repo_report, deep_tree_report
 from .doctor import render_doctor
 from .github_audit import AuditDenied, AuditLimits, audit_public_repo
 from .crawl2 import (CrawlDenied, CrawlLimits, crawl_site, render_crawl,
                      render_sitemap, sitemap_inventory)
-from .pack import (PackError, PackLimits, PackRefused, pack_github,
+from .pack import (PackError, PackLimits, PackRefused, build_pack, pack_github,
                    render_pack)
+from .upload import (MAX_UPLOAD_BYTES, UploadDenied, cleanup, download_cap,
+                     intake, parse_document, safe_file_path, sniff)
 from .report import (PHOTO, render_deep_report, render_help, render_link,
                      render_lore, render_report, render_site_map, render_start)
 
@@ -43,7 +46,8 @@ class HandledResult:
 
 class DevinBot:
     def __init__(self, config: Config, transport, github_fetch, public_fetch=None,
-                 bundle_passphrase: str | None = None):
+                 bundle_passphrase: str | None = None, file_get=None,
+                 transport_max_bytes: int = MAX_UPLOAD_BYTES):
         self.config = config
         self.authorizer = Authorizer(config.allowed_user_ids,
                                      config.allowed_group_ids)
@@ -53,6 +57,10 @@ class DevinBot:
         # Held only in memory, never logged, never in a repr. None disables
         # /bundle outright (fail-closed: no key, no sealed artifact).
         self.bundle_passphrase = bundle_passphrase
+        # Document intake: `file_get(url, timeout) -> Response`, host-pinned to
+        # api.telegram.org. None disables upload intake entirely (fail-closed).
+        self.file_get = file_get
+        self.transport_max_bytes = int(transport_max_bytes)
         self._backoff = 0.0
         # Live identity, adopted from getMe at startup; seeded from config so
         # group addressing can be unit-tested without a network round trip.
@@ -205,6 +213,11 @@ class DevinBot:
         if decision.chat_type in ("group", "supergroup"):
             if not self._addressed_in_group(msg, text):
                 return HandledResult(uid, "ignored", "not addressed in group")
+
+        # An uploaded archive IS the command: there is no text to parse. Group
+        # uploads are ignored above (not addressed) and refused below (DM only).
+        if not text and isinstance(msg.get("document"), dict):
+            return self._handle_document(uid, msg, decision)
 
         cmd = parse_command(text, self.config.limits.max_message_len)
 
@@ -414,7 +427,8 @@ class DevinBot:
             return HandledResult(uid, "replied", "bundle-no-key")
         try:
             res = pack_github(cmd.arg, self.github_fetch, self.bundle_passphrase,
-                              limits=self._pack_limits())
+                              limits=self._pack_limits(),
+                              token=self.config.github_token)
         except PackRefused as e:
             self._reply(decision.chat_id, f"bundle refused — {str(e)[:300]}",
                         reply_to=decision.message_id, thread_id=decision.thread_id)
@@ -439,6 +453,127 @@ class DevinBot:
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", "bundle-upload-error")
         return HandledResult(uid, "replied", f"bundle:{res.files}f")
+
+    def _upload_refusal(self, decision, text, reason) -> HandledResult:
+        self._reply(decision.chat_id, text, reply_to=decision.message_id,
+                    thread_id=decision.thread_id)
+        return HandledResult(decision.user_id if hasattr(decision, "user_id")
+                             else None, "replied", reason)
+
+    def _handle_document(self, uid, msg: dict, decision: AccessDecision) -> HandledResult:
+        """Audit — and, when a sealing key exists, SEAL — an uploaded code set.
+
+        This is the private-code path with no GitHub in it: whatever you have
+        locally, compress it, send it, and get a static report back. When a
+        sealing key is provisioned the same tree also comes back as ONE
+        encrypted file, which is the "deploy encrypted onto any code set" story
+        told honestly: a handoff artifact, not an execution or a deployment.
+
+        Refusals, in order, all fail-closed: not a DM, disabled intake, bad
+        filename/format/size, unusable file path from Telegram, download
+        failure, actual bytes over the cap, magic-byte mismatch, unopenable
+        archive. Nothing is executed at any point.
+        """
+        if (decision.chat_type or "").lower() != "private":
+            return HandledResult(uid, "ignored", "upload-not-dm")
+        if self.file_get is None:
+            return self._upload_refusal(
+                decision, "upload intake isn't wired up here — use /bundle "
+                          "<github-url> for a repo, or ask the operator.",
+                "upload-disabled")
+        try:
+            up = parse_document(msg, MAX_UPLOAD_BYTES)
+        except UploadDenied as e:
+            return self._upload_refusal(decision, str(e), "upload-refused")
+
+        try:
+            got = self._call("getFile", {"file_id": up.file_id})
+        except TelegramError:
+            return self._upload_refusal(decision, "telegram wouldn't hand me "
+                                                  "that file. resend it?",
+                                        "upload-getfile")
+        path = safe_file_path((got.get("result") or {}).get("file_path"))
+        if path is None:
+            return self._upload_refusal(
+                decision, "telegram returned a file path I won't follow — "
+                          "refusing.", "upload-badpath")
+
+        cap = download_cap(self.transport_max_bytes, MAX_UPLOAD_BYTES)
+        try:
+            resp = self.file_get(
+                f"{TELEGRAM_API}/file/bot{self.config.token}/{path}",
+                self.config.limits.http_timeout)
+            data = resp.body or b""
+        except Exception:
+            return self._upload_refusal(decision, "the download failed — try "
+                                                  "again.", "upload-fetch")
+        if getattr(resp, "status", 0) != 200 or not data:
+            return self._upload_refusal(decision, "the download came back "
+                                                  "empty — try again.",
+                                        "upload-empty")
+        if len(data) > cap:
+            return self._upload_refusal(
+                decision, f"that unpacked to {len(data) // 1_048_576} MB; my cap "
+                          f"is {cap // 1_048_576} MB.", "upload-toobig")
+        if not sniff(up.kind, data):
+            return self._upload_refusal(
+                decision, "those bytes aren't really a "
+                          f"{'zip' if up.kind == 'zip' else 'gzipped tarball'} — "
+                          "I won't guess at a renamed file.", "upload-notarchive")
+
+        root = None
+        try:
+            try:
+                root, truncated = intake(up.kind, data, self._upload_limits())
+            except UploadDenied as e:
+                return self._upload_refusal(decision, str(e), "upload-unopenable")
+            report = deep_tree_report(root, self._audit_limits(),
+                                      owner="upload", repo=up.label(), ref="",
+                                      truncated=truncated)
+            sealed = None
+            seal_note = ""
+            if self.bundle_passphrase:
+                try:
+                    sealed = build_pack(root, self.bundle_passphrase,
+                                        label=up.label().rsplit(".", 1)[0],
+                                        limits=self._pack_limits())
+                except PackRefused as e:
+                    seal_note = f"\n\nnot sealed — {str(e)[:160]}"
+                except Exception:
+                    seal_note = "\n\nnot sealed — the packager failed."
+            self._reply(decision.chat_id, render_deep_report(report) + seal_note,
+                        reply_to=decision.message_id,
+                        thread_id=decision.thread_id)
+            if sealed is not None:
+                try:
+                    self._send_document(
+                        decision.chat_id, sealed.filename(), sealed.blob,
+                        caption=render_pack(sealed, max_len=1000),
+                        thread_id=decision.thread_id,
+                        boundary="----devin" + sealed.bundle_sha256[:16])
+                except TelegramError:
+                    self._reply(decision.chat_id,
+                                "audited and sealed, but the upload back to "
+                                "you failed.", reply_to=decision.message_id,
+                                thread_id=decision.thread_id)
+                    return HandledResult(uid, "replied", "upload-seal-failed")
+            return HandledResult(uid, "replied",
+                                 f"upload:{report.files_scanned}f"
+                                 + (":sealed" if sealed is not None else ""))
+        except Exception:
+            self._reply(decision.chat_id, "that one failed to analyze — try "
+                                          "resending it.",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "upload-error")
+        finally:
+            cleanup(root)
+
+    def _upload_limits(self) -> AnalysisLimits:
+        L = self.config.limits
+        return AnalysisLimits(max_files=max(200, L.max_repo_files * 4),
+                             max_file_bytes=L.max_file_bytes,
+                             max_total_bytes=L.max_total_bytes,
+                             max_findings=max(200, L.max_findings * 4))
 
     def _handle_doctor(self, uid, cmd: Command, decision: AccessDecision) -> HandledResult:
         try:
