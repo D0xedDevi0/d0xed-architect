@@ -22,7 +22,11 @@ Missing/invalid token or users list → `ConfigError` → no startup.
 
 ## Commands (bounded)
 
-- `/start`, `/help` — static banner/help.
+- `/start` — opens with Looper #706's artwork + the welcome caption (falls back
+  to a plain text banner if the photo is rejected).
+- `/help` — command list.
+- `/lore` — who DEVin is: his on-chain identity, class, and trait stack, stated
+  from bundled data (no fetch).
 - `/audit https://github.com/<owner>/<repo>` — static-only scan of a repository
   (secrets + risky patterns, `path:line` + masked snippet + sha256 receipts).
   Rejects any other scheme/host/subpath. Public repos work by default; a

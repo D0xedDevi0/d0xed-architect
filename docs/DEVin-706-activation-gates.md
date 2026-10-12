@@ -1,6 +1,6 @@
 # DEVin / Looper #706 — read-only activation gate
 
-**Status:** Bot DEPLOYED and running (read-only). The adapter authorization route is verified; the remaining on-chain items (agent URI content, optional wallet binding) are deliberately untouched. No registry transaction, wallet transfer, or ownership change has been made. Read-only Base queries plus one local challenge signature only.
+**Status:** Bot DEPLOYED and running (read-only). The adapter authorization route is verified. The **agent URI has been updated** (2026-10-12, owner-authorized) through the adapter's controller route to a DEVin-branded registration — see "Agent URI update" below. Wallet binding is still deliberately unset (zero). No wallet transfer or ownership change has been made.
 
 ## Evidence (Base chain ID 8453, queried 2026-10-11)
 
@@ -17,8 +17,18 @@ The registration is **owned by an adapter contract**, not an unrelated EOA. Base
 
 ## Remaining activation gates (on-chain only)
 
-- Prepare an agent registration file describing only the DEVin capabilities and reachable endpoints that actually exist, then validate the schema and publication destination before calling `Adapter8004.setAgentURI`; use `eth_call` preflight and verify the on-chain URI afterward. **No registration update has been made** — the existing `tokenURI` still points at the generic Looper #706 registration.
+- **DONE (2026-10-12):** a DEVin registration file was prepared, schema-validated, published at an immutable public URL, preflighted with `eth_call`, written via `Adapter8004.setAgentURI`, and verified on-chain. See the next section.
 - Decide whether an agent payment wallet is needed. If not, leave `getAgentWallet(87226)` unset (zero); do not bind the main Looper-owner wallet simply to make the field nonzero. If needed later, separate the spending wallet and explicitly approve the signature/domain/deadline and caps.
+
+## Agent URI update (completed 2026-10-12, owner-authorized)
+
+- **New URI:** `https://raw.githubusercontent.com/D0xedDevi0/d0xed-architect/31113662826f41ca2ededafeb469cc7e290831cf/devin/registration/agent-87226.json` (immutable, commit-SHA-pinned; source `devin/registration/agent-87226.json`).
+- **Previous URI (for restore):** `https://arweave.net/wC0L6LR_IGsS_SgAQFrSbnzsjVgAbOlwZcV_lbrp_v8/706.json`
+- **Tx:** `0x182bbb77f5b265cb03a881635e9f230af236b836785809fec1ae45474d61bce3` (status 0x1, gasUsed 133 681, signer `0x23129c0472172D75bEd1e6dd061301796760Ecd9` = Looper #706 owner).
+- **Call:** `Adapter8004.setAgentURI(87226, newURI)` — controller route. Emitted `AgentURISet(87226, newURI, 0x23129c04…)` from the adapter and `URIUpdated(87226, newURI, adapter)` + `MetadataUpdate(87226)` from the registry.
+- **Verified:** `IdentityRegistry.tokenURI(87226)` read back the new URI on two independent RPCs (mainnet.base.org, base-rpc.publicnode.com); the raw URL returns HTTP 200. The registration preserves every original field (trait atoms, class scores, personality, lore, activation, provenance) and adds DEVin's name/description/image, operator, Telegram handle, capabilities, and constraints.
+- **Restore (one call):** `cast send 0x270d25D2c59A8bcA1B0f40ad95fF7806c0025c27 "setAgentURI(uint256,string)" 87226 "<previous URI>" --private-key <agent-wallet.key> --rpc-url https://mainnet.base.org`.
+- **Durability caveat:** the pointer now depends on the `d0xed-architect` repo staying **public** (pin to the SHA above is immutable, but a deleted/private repo would 404 the metadata). If you'd rather host it on an owned domain (`d0xeddev.com`) or content-addressed storage, say so and it can be re-pointed in one call.
 
 ## Deployment (completed 2026-10-11)
 

@@ -56,10 +56,21 @@ The visual traits ARE the voice spec. Read them literally:
 ## Telegram copy
 
 - **Description** (`setMyDescription`) and **About** (`setMyShortDescription`),
-  the **/start** welcome banner, the **/help** text, and the command-menu
-  entries all live in `devin/report.py` (`DESCRIPTION`, `ABOUT`, `START_TEXT`,
-  `HELP_TEXT`, `COMMANDS`) so there is a single source of truth. Do not set
+  the **/start** welcome (sent as Looper #706's artwork with the banner as the
+  caption, text fallback if the photo is rejected), the **/lore** identity
+  reply, the **/help** text, and the command-menu entries all live in
+  `devin/report.py` (`DESCRIPTION`, `ABOUT`, `PHOTO`, `START_TEXT`, `HELP_TEXT`,
+  `render_lore`, `COMMANDS`) so there is a single source of truth. Do not set
   Telegram copy by hand — change it here and re-apply.
+
+## On-chain identity
+
+The ERC-8004 agent URI for `87226` points at `devin/registration/agent-87226.json`
+(published at an immutable commit-SHA raw URL), written through the verified
+`Adapter8004` controller route on 2026-10-12. That file carries this persona's
+name/description/image plus operator, Telegram handle, capabilities and
+constraints, and preserves every original collection field. See
+`docs/DEVin-706-activation-gates.md` for the transaction and the one-call restore.
 
 ## Provenance / honesty
 
