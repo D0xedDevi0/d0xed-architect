@@ -74,7 +74,7 @@ class TestCommands(unittest.TestCase):
     def test_command_table(self):
         self.assertEqual(COMMANDS,
                          ("/start", "/help", "/lore", "/audit", "/debug",
-                          "/map", "/doctor"))
+                          "/map", "/crawl", "/sitemap", "/link", "/doctor"))
 
 
 if __name__ == "__main__":

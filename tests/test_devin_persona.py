@@ -25,7 +25,8 @@ class TestPersonaCopy(unittest.TestCase):
     def test_command_menu_shape(self):
         names = [c["command"] for c in COMMANDS]
         self.assertEqual(names,
-                         ["start", "help", "lore", "audit", "debug", "map", "doctor"])
+                         ["start", "help", "lore", "audit", "debug", "map",
+                          "crawl", "sitemap", "link", "doctor"])
         for c in COMMANDS:
             self.assertRegex(c["command"], r"^[a-z0-9_]{1,32}$")
             self.assertTrue(1 <= len(c["description"]) <= 256)

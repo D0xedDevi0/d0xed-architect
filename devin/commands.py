@@ -1,26 +1,57 @@
 """Bounded command parsing.
 
 The allowed set is a single tuple so a handler cannot exist without a
-registration (see the bot dispatch-table test). Commands are /start /help /lore
-(no arg), /audit /debug /map (one URL arg), and /doctor (no arg). Anything
-else — unknown commands, plain text, oversized messages, wrong arity — is a
-`reject` and never reaches a handler.
+registration (see the bot dispatch-table test). Commands are:
+
+  /start [payload]   /help   /lore   /doctor   /link
+  /audit <url>  /debug <url>  /map <url>  /sitemap <url>
+  /crawl <url> [depth]
+
+Anything else — unknown commands, plain text, oversized messages, wrong arity,
+an out-of-range crawl depth — is a `reject` and never reaches a handler.
+
+`/start` accepts an optional deep-link payload (Telegram sends
+`/start <payload>` for `https://t.me/<bot>?start=<payload>`); the payload is
+carried as `arg` so the welcome can be tailored without a second command.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-COMMANDS = ("/start", "/help", "/lore", "/audit", "/debug", "/map", "/doctor")
+COMMANDS = ("/start", "/help", "/lore", "/audit", "/debug", "/map", "/crawl",
+            "/sitemap", "/link", "/doctor")
 
-_NO_ARG = ("start", "help", "lore", "doctor")
-_ONE_ARG = ("audit", "debug", "map")
+_NO_ARG = ("help", "lore", "doctor", "link")
+_ONE_ARG = ("audit", "debug", "map", "sitemap")
+_DEPTH_ARG = ("crawl",)
+
+# A crawl deeper than this stops being a site map and starts being a burden on
+# someone else's server; the handler also enforces this.
+MIN_DEPTH, MAX_DEPTH = 1, 4
+
+_PAYLOAD_MAX = 64
 
 
 @dataclass(frozen=True)
 class Command:
-    kind: str              # "start" | "help" | "audit" | "debug" | "map" | "doctor" | "reject"
+    kind: str              # "start" | "help" | ... | "reject"
     arg: str | None = None
     error: str | None = None
+    depth: int | None = None
+
+
+def _clean_payload(rest: str) -> str | None:
+    """Deep-link payloads are untrusted input: keep them short, printable, and
+    alphanumeric-ish, and never echo anything that looks like a token."""
+    p = rest.strip()
+    if not p:
+        return None
+    p = p.split()[0]
+    if len(p) > _PAYLOAD_MAX:
+        return None
+    if not all(c.isalnum() or c in "-_" for c in p):
+        return None
+    return p
 
 
 def parse_command(text: str | None, max_len: int) -> Command:
@@ -37,11 +68,26 @@ def parse_command(text: str | None, max_len: int) -> Command:
     if name not in COMMANDS:
         return Command("reject", error="unknown command")
     kind = name[1:]
+    if kind == "start":
+        return Command("start", arg=_clean_payload(rest))
     if kind in _NO_ARG:
         return Command(kind)
-    # /audit /debug /map require exactly one argument
-    if not rest:
-        return Command("reject", error=f"usage: /{kind} <url>")
-    if len(rest.split()) != 1:
-        return Command("reject", error=f"usage: /{kind} <url>")
-    return Command(kind, arg=rest)
+    if kind in _ONE_ARG:
+        if not rest:
+            return Command("reject", error=f"usage: /{kind} <url>")
+        if len(rest.split()) != 1:
+            return Command("reject", error=f"usage: /{kind} <url>")
+        return Command(kind, arg=rest)
+    # /crawl <url> [depth]
+    args = rest.split()
+    if not args or len(args) > 2:
+        return Command("reject", error="usage: /crawl <url> [depth 1-4]")
+    depth = None
+    if len(args) == 2:
+        try:
+            depth = int(args[1])
+        except ValueError:
+            return Command("reject", error="usage: /crawl <url> [depth 1-4]")
+        if not (MIN_DEPTH <= depth <= MAX_DEPTH):
+            return Command("reject", error=f"usage: depth must be {MIN_DEPTH}-{MAX_DEPTH}")
+    return Command("crawl", arg=args[0], depth=depth)

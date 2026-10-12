@@ -25,8 +25,9 @@ class TestBotCommands(unittest.TestCase):
     def test_start(self):
         bot, _, tg = make_bot()
         r = bot.handle_update(dm_update(1, USER_ID, "/start"))
+
         self.assertEqual(r.action, "replied")
-        self.assertEqual(r.detail, "start")
+        self.assertEqual(r.detail, "start:-")
         # /start opens with Looper #706's art + the welcome caption
         self.assertEqual(tg.photos[0]["photo"], PHOTO)
         self.assertIn("/audit", tg.photos[0]["caption"])
@@ -69,7 +70,8 @@ class TestBotCommands(unittest.TestCase):
         # A handler must exist for every registered command (no dead code).
         bot, _, _ = make_bot()
         expectations = {
-            "/start": "start",
+            "/start": "start:-",
+            "/link": "link",
             "/help": "help",
             "/lore": "lore",
             "/doctor": "doctor",
@@ -79,7 +81,7 @@ class TestBotCommands(unittest.TestCase):
             self.assertEqual(r.detail, expected, cmd)
         self.assertEqual(COMMANDS,
                          ("/start", "/help", "/lore", "/audit", "/debug",
-                          "/map", "/doctor"))
+                          "/map", "/crawl", "/sitemap", "/link", "/doctor"))
         # /audit and /debug are exercised here; /map needs an injected fetcher.
         r = bot.handle_update(dm_update(2, USER_ID, "/audit https://github.com/a/b"))
         self.assertTrue(r.detail.startswith("audit:"), r.detail)
@@ -101,7 +103,7 @@ class TestNewCommands(unittest.TestCase):
         tg = FakeTelegram(photo_ok=False)
         bot, _, tg = make_bot(tg=tg)
         r = bot.handle_update(dm_update(1, USER_ID, "/start"))
-        self.assertEqual(r.detail, "start")
+        self.assertEqual(r.detail, "start:-")
         self.assertEqual(len(tg.photos), 1)           # photo was attempted
         self.assertIn("/audit", tg.sent[0]["text"])   # text fallback landed
 
@@ -259,7 +261,8 @@ class TestBotHygiene(unittest.TestCase):
         bot, _, tg = make_bot(tg=tg)
         new_offset, results = bot.poll_once(0)
         self.assertEqual(new_offset, 12)
-        self.assertEqual([r.detail for r in results], ["start", "sender not allowlisted"])
+        self.assertEqual([r.detail for r in results],
+                         ["start:-", "sender not allowlisted"])
 
     def test_auth_error_stops_run(self):
         class BadTG(FakeTelegram):

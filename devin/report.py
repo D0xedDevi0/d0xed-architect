@@ -41,16 +41,36 @@ COMMANDS = [
     {"command": "audit", "description": "Read a GitHub repo cold (secrets, risks)"},
     {"command": "debug", "description": "Deep architecture / debug report"},
     {"command": "map", "description": "Map a public site (robots first)"},
+    {"command": "crawl", "description": "Crawl a public site: pages, links, assets"},
+    {"command": "sitemap", "description": "Read a site's sitemap.xml inventory"},
+    {"command": "link", "description": "Shareable links to add DEVin anywhere"},
     {"command": "doctor", "description": "Self-diagnostics"},
 ]
+
+# Deep-link payloads: https://t.me/<bot>?start=<payload>. A payload only ever
+# selects which sentence the welcome opens with — it never carries a target,
+# never authorizes anything, and never reaches a handler as an instruction.
+DEEPLINK_PAYLOADS = {
+    "audit": "/audit <github-url> — paste a repo and I read it cold.",
+    "debug": "/debug <github-url> — deep read: languages, imports, cycles, CI.",
+    "map": "/map <url> — I map one page of a public site, robots first.",
+    "crawl": "/crawl <url> [depth 1-4] — I walk it: pages, link graph, assets.",
+    "sitemap": "/sitemap <url> — I read its sitemap.xml inventory.",
+    "lore": "/lore — who I am, straight off the chain.",
+    "group": "Add me to a room and address me: /help@<my-username>",
+    "help": "/help — everything I can do.",
+}
 
 START_TEXT = (
     "🟦 DEVin — Looper #706. Online.\n\n"
     "Builder/Engineer · agent operator. Night shift command desk. "
     "Reads state, not vibes.\n\n"
     "/audit <github-url> — read a repo cold: secrets, risky patterns, receipts.\n"
-    "/debug <github-url> — architecture: languages, imports, cycles, CI.\n"
-    "/map <url> — map a public site, robots first.\n"
+    "/debug <github-url> — architecture: languages, imports, cycles, SBOM.\n"
+    "/map <url> — map one page of a public site, robots first.\n"
+    "/crawl <url> [depth] — walk the site: pages, link graph, assets.\n"
+    "/sitemap <url> — read its sitemap.xml inventory.\n"
+    "/link — shareable links to put me in a DM or a group.\n"
     "/lore — who I am.   /doctor — self-check.   /help — the rest.\n\n"
     "Static only. I don't run your code, I don't spend, I don't touch wallets.\n"
     "Wire a tool. Debug a workflow. Ship an integration."
@@ -66,6 +86,11 @@ HELP_TEXT = (
     "                   languages, imports, cycles, manifests, CI, tests\n"
     "/map <url>       — /map https://example.com (public site only)\n"
     "                   robots first; same-origin links only\n"
+    "/crawl <url> [n] — bounded crawl, same-origin, robots on every URL\n"
+    "                   n = depth 1-4 (default 2). Pages, link graph,\n"
+    "                   assets, external hosts, per-page sha256 receipts.\n"
+    "/sitemap <url>   — sitemap.xml + sitemapindex inventory (robots hints first)\n"
+    "/link            — deep links to put me in a DM, a group, or a README\n"
     "/lore            — who I am (on-chain identity)\n"
     "/doctor          — self-diagnostics\n\n"
     "In a group, address me: /audit@DEVinlooperbot https://github.com/o/r\n"
@@ -73,8 +98,38 @@ HELP_TEXT = (
 )
 
 
-def render_start() -> str:
+def render_start(payload: str | None = None) -> str:
+    """The welcome. A deep-link payload only picks the opening line."""
+    hint = DEEPLINK_PAYLOADS.get((payload or "").strip().lower())
+    if hint:
+        return _truncate(f"🟦 DEVin — Looper #706. Online.\n\n{hint}\n\n{START_TEXT}",
+                         1024)
     return START_TEXT
+
+
+def render_link(username: str | None) -> str:
+    """Shareable links. `username` is the live getMe username; nothing here is
+    a credential and nothing here authorizes access — the allowlist still
+    decides who is served."""
+    u = (username or "DEVinlooperbot").lstrip("@")
+    base = f"https://t.me/{u}"
+    lines = [
+        "🟦 DEVin — put me to work",
+        "",
+        f"DM:            {base}",
+        f"repo audit:    {base}?start=audit",
+        f"deep report:   {base}?start=debug",
+        f"site map:      {base}?start=map",
+        f"site crawl:    {base}?start=crawl",
+        f"sitemap:       {base}?start=sitemap",
+        f"add to a group: {base}?startgroup=true",
+        "",
+        f"Already in a room? Address me by name: /audit@{u} <url>",
+        "I stay quiet unless I'm mentioned or replied to.",
+        "",
+        "Static only — read, never executed. Allowlisted chats only.",
+    ]
+    return "\n".join(lines)
 
 
 def render_help() -> str:

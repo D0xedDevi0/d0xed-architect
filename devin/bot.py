@@ -18,8 +18,10 @@ from .crawl_cmd import MapDenied, MapLimits, site_map
 from .deep_audit import deep_repo_report
 from .doctor import render_doctor
 from .github_audit import AuditDenied, AuditLimits, audit_public_repo
-from .report import (PHOTO, render_deep_report, render_help, render_lore,
-                     render_report, render_site_map, render_start)
+from .crawl2 import (CrawlDenied, CrawlLimits, crawl_site, render_crawl,
+                     render_sitemap, sitemap_inventory)
+from .report import (PHOTO, render_deep_report, render_help, render_link,
+                     render_lore, render_report, render_site_map, render_start)
 
 TELEGRAM_API = "https://api.telegram.org"
 POLL_ERROR_BACKOFF = 2.0
@@ -78,13 +80,18 @@ class DevinBot:
             params["message_thread_id"] = thread_id
         self._call("sendMessage", params)
 
-    def _send_welcome(self, decision: AccessDecision):
+    def _send_welcome(self, decision: AccessDecision, payload: str | None = None):
         """Open with Looper #706's art + the welcome caption. Telegram fetches
         the image URL itself (the bot makes no outbound request for it). Falls
         back to a plain sendMessage if the photo is rejected, so /start always
-        lands something."""
+        lands something.
+
+        `payload` is the deep-link tail of `?start=<payload>`. It is sanitized
+        in the parser and only ever selects the opening line of the caption.
+        """
+        caption = render_start(payload)[:1024]        # telegram caption cap
         params = {"chat_id": decision.chat_id, "photo": PHOTO,
-                  "caption": render_start()[:1024]}   # telegram caption cap
+                  "caption": caption}
         if decision.message_id is not None:
             params["reply_to_message_id"] = decision.message_id
         if decision.thread_id is not None:
@@ -92,7 +99,7 @@ class DevinBot:
         try:
             self._call("sendPhoto", params)
         except TelegramError:
-            self._reply(decision.chat_id, render_start(),
+            self._reply(decision.chat_id, caption,
                         reply_to=decision.message_id, thread_id=decision.thread_id)
 
     # ── startup identity guard (fail-closed) ────────────────────────────────
@@ -158,6 +165,17 @@ class DevinBot:
         return MapLimits(max_links=L.max_links, max_bytes=L.max_crawl_bytes,
                          max_url_len=L.max_message_len)
 
+    def _crawl_limits(self, depth: int | None) -> CrawlLimits:
+        """A crawl spends someone else's bandwidth, so the page budget is
+        derived from the configured link budget rather than being unbounded."""
+        L = self.config.limits
+        pages = max(4, min(24, L.max_links // 4))
+        return CrawlLimits(max_pages=pages, max_depth=depth or 2,
+                           max_page_bytes=L.max_file_bytes,
+                           max_total_bytes=max(L.max_crawl_bytes * 4, 4_000_000),
+                           max_url_len=L.max_message_len,
+                           fetch_timeout=min(L.http_timeout, 20.0))
+
     def handle_update(self, update: dict) -> HandledResult:
         uid = update.get("update_id") if isinstance(update, dict) else None
         decision = self.authorizer.decide(update)
@@ -185,8 +203,8 @@ class DevinBot:
         cmd = parse_command(text, self.config.limits.max_message_len)
 
         if cmd.kind == "start":
-            self._send_welcome(decision)
-            return HandledResult(uid, "replied", "start")
+            self._send_welcome(decision, cmd.arg)
+            return HandledResult(uid, "replied", f"start:{cmd.arg or '-'}")
         if cmd.kind == "help":
             self._reply(decision.chat_id, render_help(),
                         reply_to=decision.message_id, thread_id=decision.thread_id)
@@ -202,6 +220,12 @@ class DevinBot:
             return self._handle_debug(uid, cmd, decision)
         if cmd.kind == "map":
             return self._handle_map(uid, cmd, decision)
+        if cmd.kind == "crawl":
+            return self._handle_crawl(uid, cmd, decision)
+        if cmd.kind == "sitemap":
+            return self._handle_sitemap(uid, cmd, decision)
+        if cmd.kind == "link":
+            return self._handle_link(uid, cmd, decision)
         if cmd.kind == "doctor":
             return self._handle_doctor(uid, cmd, decision)
         # reject
@@ -269,6 +293,49 @@ class DevinBot:
             self._reply(decision.chat_id, "No map — try again.",
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", "map-error")
+
+    def _handle_crawl(self, uid, cmd: Command, decision: AccessDecision) -> HandledResult:
+        try:
+            rep = crawl_site(cmd.arg, self.public_fetch,
+                             limits=self._crawl_limits(cmd.depth))
+            self._reply(decision.chat_id,
+                        render_crawl(rep, max_len=self.config.limits.max_reply_len),
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", f"crawl:{rep.origin}")
+        except CrawlDenied as e:
+            self._reply(decision.chat_id, f"crawl refused — {str(e)[:300]}",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "crawl-denied")
+        except Exception:
+            self._reply(decision.chat_id, "No crawl — try again.",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "crawl-error")
+
+    def _handle_sitemap(self, uid, cmd: Command, decision: AccessDecision) -> HandledResult:
+        try:
+            origin, sitemaps, urls, nested = sitemap_inventory(
+                cmd.arg, self.public_fetch, limits=self._crawl_limits(None))
+            self._reply(decision.chat_id,
+                        render_sitemap(origin, sitemaps, urls, nested,
+                                       max_len=self.config.limits.max_reply_len),
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", f"sitemap:{origin}")
+        except CrawlDenied as e:
+            self._reply(decision.chat_id, f"sitemap refused — {str(e)[:300]}",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "sitemap-denied")
+        except Exception:
+            self._reply(decision.chat_id, "No sitemap — try again.",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "sitemap-error")
+
+    def _handle_link(self, uid, cmd: Command, decision: AccessDecision) -> HandledResult:
+        """Shareable links, built from the LIVE getMe username so the copy can
+        never drift from the identity the token actually belongs to."""
+        username = self.bot_username or self.config.bot_username
+        self._reply(decision.chat_id, render_link(username),
+                    reply_to=decision.message_id, thread_id=decision.thread_id)
+        return HandledResult(uid, "replied", "link")
 
     def _handle_doctor(self, uid, cmd: Command, decision: AccessDecision) -> HandledResult:
         try:
