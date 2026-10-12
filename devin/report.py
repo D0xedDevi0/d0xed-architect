@@ -10,24 +10,59 @@ from .crawl_cmd import SiteMap
 from .deep_audit import DeepReport
 from .github_audit import AuditOutcome
 
+# ── persona copy (single source of truth for Telegram) ─────────────────────
+# Derived from Looper #706's on-chain metadata — see PERSONA.md. Do NOT set
+# Telegram copy by hand; change it here and re-apply.
+
+DESCRIPTION = (
+    "🟦 DEVin — Looper #706. Builder/Engineer · agent operator. "
+    "Walkie-talkie in hand, night shift at the command desk.\n\n"
+    "Came up inside mcp router side logs and never fully left. "
+    "Reads state, not vibes.\n\n"
+    "Send a GitHub repo and I read it cold — secrets, risky patterns, dep rot, "
+    "import cycles — every hit stamped path:line with sha256 receipts. "
+    "Send a URL and I map it, robots first.\n\n"
+    "Static only. I never run your code, never spend, never touch a wallet.\n\n"
+    "Wire a tool. Debug a workflow. Ship an integration."
+)
+
+ABOUT = ("Looper #706. Reads state, not vibes. Static-only repo + site "
+         "auditor — never runs your code.")
+
+COMMANDS = [
+    {"command": "start", "description": "Show the intro"},
+    {"command": "help", "description": "Commands and how to use them"},
+    {"command": "audit", "description": "Read a GitHub repo cold (secrets, risks)"},
+    {"command": "debug", "description": "Deep architecture / debug report"},
+    {"command": "map", "description": "Map a public site (robots first)"},
+    {"command": "doctor", "description": "Self-diagnostics"},
+]
+
 START_TEXT = (
-    "🟦 DEVin — read-only audit brain (Looper #706).\n"
-    "Commands: /start /help /audit /debug /map /doctor\n"
-    "/audit <github-url> — static-only repo scan (secrets, risky patterns).\n"
-    "/debug <github-url> — deep static architecture/debug report.\n"
-    "/map <url>            — robots-respecting map of a public site.\n"
-    "/doctor               — bounded self-diagnostics.\n"
-    "Source is inspected statically and never executed."
+    "🟦 DEVin — Looper #706. Online.\n\n"
+    "Builder/Engineer · agent operator. Night shift command desk. "
+    "Reads state, not vibes.\n\n"
+    "/audit <github-url> — read a repo cold: secrets, risky patterns, receipts.\n"
+    "/debug <github-url> — architecture: languages, imports, cycles, CI.\n"
+    "/map <url> — map a public site, robots first.\n"
+    "/doctor — self-check.   /help — the rest.\n\n"
+    "Static only. I don't run your code, I don't spend, I don't touch wallets.\n"
+    "Wire a tool. Debug a workflow. Ship an integration."
 )
 
 HELP_TEXT = (
-    "/start  — show this banner\n"
-    "/help   — show this help\n"
-    "/audit  — /audit https://github.com/<owner>/<repo>\n"
-    "/debug  — /debug https://github.com/<owner>/<repo> (architecture)\n"
-    "/map    — /map https://example.com (public site only)\n"
-    "/doctor — self-diagnostics\n"
-    "Source is inspected statically and never executed."
+    "DEVin — Looper #706. Read-only auditor.\n\n"
+    "/start           — banner\n"
+    "/help            — this\n"
+    "/audit <url>     — /audit https://github.com/<owner>/<repo>\n"
+    "                   static scan: secrets + risky patterns\n"
+    "/debug <url>     — same target, deep read:\n"
+    "                   languages, imports, cycles, manifests, CI, tests\n"
+    "/map <url>       — /map https://example.com (public site only)\n"
+    "                   robots first; same-origin links only\n"
+    "/doctor          — self-diagnostics\n\n"
+    "In a group, address me: /audit@DEVinlooperbot https://github.com/o/r\n"
+    "Source is read, never executed."
 )
 
 

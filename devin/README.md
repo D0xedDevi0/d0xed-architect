@@ -1,9 +1,14 @@
-# DEVin — offline Telegram bot scaffold (Looper #706 / ERC-8004 agent 87226)
+# DEVin — read-only Telegram auditor (Looper #706 / ERC-8004 agent 87226)
 
-Read-only, bounded, allowlisted Telegram bot scaffold. **Offline by default** —
+Read-only, bounded, allowlisted Telegram bot. **Offline by default** —
 importing the package performs no network I/O and holds no credentials. The
 only network entry point is `python -m devin`, which refuses to start without
-an env-only token and allowlist.
+a token and allowlist.
+
+**Persona:** the bot's name, voice, Telegram Description/About, `/start` banner,
+`/help`, and command menu are derived from Looper #706's real on-chain metadata
+and live in one place — see [`PERSONA.md`](PERSONA.md) and the copy constants in
+`devin/report.py`. Change copy there, never by hand in Telegram.
 
 ## Configuration (environment ONLY — fail-closed when unset)
 
