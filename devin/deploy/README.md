@@ -34,9 +34,16 @@ install -m 0644 looper-devin.service /etc/systemd/system/looper-devin.service
 # plaintext file. Prompt for it; do not pass it on the command line.
 systemd-creds encrypt --name=telegram_token - /etc/credstore.encrypted/looper-devin.token
 
-# Optional: a GitHub PAT enables /audit + /debug on PRIVATE repos. Same pattern
-# (only needed if private-repo work is wanted; the bot works without it).
+# Optional: a GitHub PAT enables /audit + /debug + /bundle on PRIVATE repos.
+# Same pattern (only needed if private-repo work is wanted; without it those
+# paths refuse clearly, and the upload path still covers private code).
 systemd-creds encrypt --name=github_token - /etc/credstore.encrypted/looper-devin.github
+
+# Optional: the /bundle + upload SEALING KEY. Without it, sealing refuses
+# (never a default passphrase) while auditing still works. Use your OWN
+# passphrase and keep it in a password manager: it is the only way to open a
+# sealed bundle, and it must never travel through chat.
+systemd-creds encrypt --name=bundle_passphrase - /etc/credstore.encrypted/looper-devin.bundle
 
 systemctl daemon-reload
 systemctl enable --now looper-devin.service
@@ -44,8 +51,10 @@ systemctl status looper-devin.service --no-pager
 ```
 
 The unit ships `LoadCredentialEncrypted=telegram_token:…` and (commented)
-`LoadCredentialEncrypted=github_token:…`. Uncomment the `github_token` line and
-`chmod 600` the encrypted file once a PAT is provisioned.
+`LoadCredentialEncrypted=github_token:…` plus
+`LoadCredentialEncrypted=bundle_passphrase:…`. Uncomment a line and `chmod 600`
+its encrypted file once the credential is provisioned; each feature fails
+closed until then.
 
 ## Verify
 
@@ -55,9 +64,23 @@ The unit ships `LoadCredentialEncrypted=telegram_token:…` and (commented)
 - In the group, `/audit@DEVinlooperbot https://github.com/<owner>/<repo>`
 - `/debug@DEVinlooperbot https://github.com/<owner>/<repo>` and
   `/map@DEVinlooperbot https://example.com`; `/doctor@DEVinlooperbot`
+- DM `/bundle https://github.com/<owner>/<repo>` → one `.tar.gz.enc` back
+  (refuses without the sealing key; refuses groups by design)
+- DM a `.zip` / `.tar.gz` **as a document** → static audit, plus the sealed
+  bundle when the sealing key is provisioned
+- Offline proof scripts (passphrase read from the env, never printed):
+  `DEVIN_LIVE_PW=… venv/bin/python devin/scripts/live_pack_check.py` and
+  `DEVIN_LIVE_ALLOW_SECRETS=1 DEVIN_LIVE_PW=… venv/bin/python devin/scripts/live_upload_check.py`
 
 ## Non-goals
 
-No spend, no wallet, no on-chain writes, no LLM prompt execution, and no shell
-execution of anything in an audited repository. This unit only serves Telegram
-and performs static, read-only inspection of GitHub repositories.
+No spend, no wallet, no on-chain writes, no LLM prompt execution, no shell or
+interpreter execution of anything in an audited repository or upload, and no
+autonomous deployment or publishing of any artifact. This unit only serves
+Telegram and performs static, read-only inspection; sealed bundles are a handoff
+artifact a human decides what to do with.
+
+A sealed bundle is symmetric AEAD (chacha20-poly1305 + scrypt) for a passphrase
+holder. It is not a signature, not a key exchange, and not forward-secret, and
+the language inventory is honest breadth (identification by extension and
+manifest), not semantic understanding of every project.

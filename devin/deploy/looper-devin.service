@@ -22,6 +22,11 @@ LoadCredentialEncrypted=telegram_token:/etc/credstore.encrypted/looper-devin.tok
 # Optional: enables /audit + /debug on PRIVATE repos. Uncomment (and chmod 600
 # the encrypted file) only once a GitHub PAT has been provisioned.
 #LoadCredentialEncrypted=github_token:/etc/credstore.encrypted/looper-devin.github
+# Optional: the SEALING KEY for /bundle and for sealing an uploaded code set.
+# Uncomment only once provisioned — a missing credential file stops the unit
+# from starting (systemd fails closed on LoadCredentialEncrypted), and without
+# it sealing refuses rather than using a guessable default.
+#LoadCredentialEncrypted=bundle_passphrase:/etc/credstore.encrypted/looper-devin.bundle
 Restart=always
 RestartSec=10
 UMask=0077
