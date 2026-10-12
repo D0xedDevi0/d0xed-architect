@@ -1,137 +1,169 @@
-# 🟦 D0xed Architect
+<p align="center">
+  <img src="docs/assets/hero.svg" alt="D0xED ARCHITECT CRAWLER" width="100%">
+</p>
 
-An **identity-declared, x402-paying agentic crawler + code auditor**.
-It doesn't ignore the 2026 crawling contract — it implements it.
+<p align="center">
+  <a href="https://github.com/D0xedDevi0/d0xed-architect/actions"><img src="https://img.shields.io/badge/tests-306%20passed-00d4ff" alt="tests: 306 passed"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white" alt="python 3.11+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3366cc" alt="license MIT"></a>
+  <a href="https://t.me/DEVinlooperbot"><img src="https://img.shields.io/badge/Telegram-DEVinlooperbot-26A5E4?logo=telegram&logoColor=white" alt="Telegram DEVinlooperbot"></a>
+  <a href="https://base.org"><img src="https://img.shields.io/badge/Base-L2-0052FF" alt="Base L2"></a>
+</p>
 
-## Why this exists
+# D0xED Architect
 
-The web split into three camps: **block**, **allow**, or **charge**.
-Cloudflare's *pay-per-crawl* and the x402 Foundation turned HTTP `402`
-into a machine-readable "yes, if". Every other crawler gets 403'd.
-D0xed Architect pays, and gets let in.
+**A bounded, read-only code-intelligence crawler and polyglot static analyzer,
+fronted by DEVin — a Telegram bot (Looper #706) that reads your code cold and
+stamps every finding with a `path:line` and a `sha256` receipt.**
 
-## What it does
+Send DEVin a public GitHub repo, or DM it a `.zip` / `.tar.gz` of your own
+tree, and it statically maps secrets, risky patterns, import cycles, dependency
+rot, and drift — then hands the result back sealed as one encrypted file.
+Source is read. Source is never executed.
 
-| Layer | Contract it honours |
+## Architecture
+
+```mermaid
+flowchart LR
+    A["Crawler<br/>robots-first · same-origin BFS<br/>page/byte/time caps"] --> B["Static Analyzer<br/>polyglot · secrets · SBOM<br/>licenses · CI/IaC · tests"]
+    B --> C["Evidence Receipts<br/>path:line + masked snippet<br/>sha256(file) + sha256(snippet)"]
+    C --> D["Encrypted Bundle<br/>ChaCha20-Poly1305 + scrypt<br/>per-file sha256 manifest"]
+    G["GitHub intake<br/>api.github.com + codeload"] --> B
+    U["Upload intake<br/>.zip / .tar.gz, DM only"] --> B
+    D --> H["Human handoff<br/>open_pack / verify_pack"]
+```
+
+## Features
+
+| Component | What it does |
 |---|---|
-| `http.py` | robots.txt · content-signals · llms.txt v2 · Web Bot Auth identity headers · HTTP 402 detection |
-| `escalate.py` | HTTP-first ladder: render JS shells in a real browser only when needed (`crawl --render`, `map_site(render=True)`), capped per run |
-| `extract.py` | HTML → title/headings/links/code/JSON-LD/emails, stdlib only |
-| `trust.py` | indirect prompt-injection firewall, zero-width/bidi/hidden-text detection, provenance score |
-| `graph.py` | SQLite site + module graph (nodes/edges, hubs, orphans) |
-| `audit.py` | secret scan (12 rules), risky-pattern scan (14 rules), import graph, entrypoints |
-| `crypto.py` | AES-256-GCM + scrypt envelope encryption for every report |
-| `report.py` | D0xed blueprint-style markdown output |
-| `sentinel.py` | deterministic architecture fingerprint (`arch_root`) · Ed25519-signed baseline · 9-class drift diff (modules, import edges, entrypoints, deps) · signed drift reports a third party can verify with only a public key |
-| `watch.py` | standing guard: rolling baseline kept outside the audited tree, a tampered baseline is refused (never repaired), append-only drift log, cron-shaped exit codes |
-| `viz.py` | deterministic SVG drift map — cyan added · amber modified · red removed · same input, byte-identical output |
+| `devin/crawl2.py` | Bounded BFS crawler: depth limits, same-origin enforcement, robots.txt on every URL (fails closed if unavailable), sitemap/index discovery, link + asset inventory, per-page SHA-256 provenance receipts, XML entity rejection, page/byte/time caps. |
+| `devin/analysis.py` | Polyglot static analyzer: language detection by extension/manifest, secret rules, SBOM/dependency extraction, licenses, CI/IaC/test signals, lockfiles, evidence receipts, masked snippets, traversal-safe archive extraction. |
+| `devin/deep_audit.py` | Deep architecture/debug report: languages, entrypoints, top imports + import cycles, dependency manifests, CI workflows, test files, TODO/FIXME counts. |
+| `devin/pack.py` + `devin/crypto.py` | Encrypted artifact packager: per-file SHA-256 manifest, embedded static audit, sealed with ChaCha20-Poly1305 (RFC 8439, pure stdlib) + scrypt key derivation, refuses on discovered live credentials, size caps, `open_pack` / `verify_pack`. |
+| `devin/upload.py` | Private code-set intake: DM a `.zip` / `.tar.gz`, bounded before and after download, magic-byte validation, traversal/symlink/hardlink protection, static-only processing. |
+| `devin/github_audit.py` | Public and private GitHub intake via `api.github.com` + `codeload.github.com`, with an optional PAT used **only** as an `Authorization` header. |
+| `devin/deploy/` | Deployment reality: hardened systemd unit, encrypted credentials, fail-closed allowlists. |
 
-## Install
+## Commands
 
-```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install .             # CLI: includes eth-account + cryptography
-.venv/bin/architect --help
-# Optional browser escalation and MCP server:
-.venv/bin/python -m pip install '.[all]'
-.venv/bin/python -m playwright install chromium
-# MCP stdio: .venv/bin/python -m architect.mcp_server
+| Command | What it does |
+|---|---|
+| `/start` | Intro banner |
+| `/help` | Command list |
+| `/lore` | Who DEVin is (on-chain identity) |
+| `/audit <github-url>` | Static scan: secrets + risky patterns |
+| `/debug <github-url>` | Deep read: languages, imports, cycles, manifests, CI, tests |
+| `/map <url>` | Map one page of a public site, robots first |
+| `/crawl <url> [depth]` | Bounded crawl, same-origin, robots on every URL (depth 1-4, default 2) |
+| `/sitemap <url>` | `sitemap.xml` / `sitemapindex` inventory |
+| `/bundle <github-url>` | Seal a repo into one encrypted file (DM only) |
+| `/doctor` | Self-diagnostics |
+| `/link` | Deep links to add DEVin anywhere |
+
+## What it looks like
+
+The test suite is the source of truth for what works:
+
+```console
+$ cd d0xed-architect
+$ python3 -m unittest $(ls tests/test_devin_*.py | sed 's|/|.|; s|\.py$||')
+........................................................................................................................................................................................................
+----------------------------------------------------------------------
+Ran 306 tests in 7.429s
+
+OK
 ```
 
-`browser` and `mcp` are separately installable extras (`'.[browser]'`,
-`'.[mcp]'`); Chromium is not bundled in the wheel. HTTP-only crawling needs
-no Playwright. Payment remains opt-in and requires separate signer/cap setup;
-installation never authorizes a transaction. This is a tested wheel/sdist
-installation, **not** a PyPI release or production deployment.
+A static pass never executes a file and never leaks a secret — findings are
+masked and receipted:
 
-
-## Use
-
-```bash
-# map a site (respects robots.txt, reads llms.txt first)
-.venv/bin/python -m architect.cli crawl https://d0xeddev.com --depth 2 --max-pages 30 --out site.md
-
-# render JS shells too (HTTP-first ladder, capped at 25 browser renders)
-.venv/bin/python -m architect.cli crawl https://d0xeddev.com --render --max-renders 25
-
-# audit a codebase
-.venv/bin/python -m architect.cli audit /path/to/repo --out audit.md --graph audit.db
-
-# encrypted, per-user artifact
-export ARCHITECT_PASSPHRASE='...'
-.venv/bin/python -m architect.cli audit /path/to/repo --out audit.md --encrypt
-
-# decrypt anywhere
-.venv/bin/python -m architect.cli decrypt audit.md.enc
-
-# sentinel: fingerprint this tree, then prove what changed against it
-.venv/bin/python -m architect.cli sentinel capture . --out baseline.json --sign
-.venv/bin/python -m architect.cli sentinel diff . --baseline baseline.json
-
-# drift is advisory (exit 0) unless something was REMOVED — then exit 1
+```console
+$ python3 - <<'PY'
+from devin.analysis import analyze_tree
+rep = analyze_tree("demo")
+for f in rep.findings:
+    print(f"{f.severity:8s} {f.path}:{f.line} [{f.rule}]")
+    print(f"    {f.snippet}")
+    print(f"    sha256:{f.snippet_sha256[:16]}…  (file {f.file_sha256[:16]}…)")
+PY
+files: 2  loc: 6  languages: {'Python': 1}
+critical app.py:3 [secret:openai_key]
+    API_KEY = "sk-123…cdef (35 chars)"
+    sha256:1120215a4d60ecb0…  (file 96d398b2f051…) 
+high     app.py:3 [secret:conn_string_pw]
+    API_KEY = "sk-123…cdef (35 chars)"
+    sha256:1120215a4d60ecb0…  (file 96d398b2f051…)
 ```
 
-`diff` on an unchanged tree prints `no drift (architecture unchanged)` and exits 0.
-A signed baseline (`--sign`) is verified before it is trusted; a tampered one is
-refused cleanly.
+Sealing a tree refuses live credentials by default, and a clean seal round-trips:
 
-## Typed extraction (opt-in MCP tool)
-
-The `extract_typed(url, schema_json, use_llm=False, max_model_calls=1)` MCP tool
-returns schema-shaped values and per-field literal excerpts, locators, methods,
-and SHA-256 of fetched source bytes. `scrape_url` still returns markdown. Schemas
-are capped at 8 KiB / 16 fields; selectors are declarative (`title`, `h1`,
-`description`, `canonical`, `lang`, `headings`, `links`, `text`, `jsonld:<key>`).
-Unsupported values are `null`. The new fetch path checks public DNS at each
-redirect, validates robots.txt before page fetching, rejects 402 without payment,
-and caps responses. Its SSRF defenses rely on the bundled pinned-IP stdlib HTTP
-transport; do not replace that transport with an unguarded client in production.
-
-The model path is **off by default**. To use Nous Portal via Hermes OAuth, start
-its loopback proxy (in another terminal/session) before calling with
-`use_llm=True`:
-
-```bash
-hermes proxy start --provider nous --host 127.0.0.1 --port 8901
+```console
+$ python3 - <<'PY'
+from devin.pack import build_pack, verify_pack
+try:
+    build_pack("demo", "correct horse battery staple", label="demo")
+except Exception as e:
+    print("refused:", e)          # live credentials -> refused
+open("demo/app.py", "w").write("def greet(n): return f'hi {n}'\n")
+res = build_pack("demo", "correct horse battery staple", label="demo")
+print(f"plaintext: {res.plaintext_bytes} B -> sealed: {res.encrypted_bytes} B")
+print(f"bundle sha256: {res.bundle_sha256[:16]}…")
+v = verify_pack(res.blob, "correct horse battery staple")
+print(f"verified files: {v['checked']}   cipher: chacha20-poly1305 + scrypt")
+PY
+refused: refusing to seal: live credentials detected (2 high/critical secret finding(s)) …
+plaintext: 742 B -> sealed: 808 B
+bundle sha256: 63a130bcd381607e…
+verified files: 2   cipher: chacha20-poly1305 + scrypt
 ```
 
-It uses the catalog-tested `deepseek/deepseek-v4.1-flash` model through that
-fixed loopback endpoint. No API key is stored in this project. If the proxy is
-absent, the model step fails closed and deterministic partial results remain.
-At most one 12,000-character / 512-output-token model call processes unresolved
-fields; explicitly selected DOM/JSON-LD fields are never guessed by the model.
-Every accepted model field must also have a verbatim excerpt in fetched bytes.
-For `text` without a hint, the normalized visible text carries an array of
-verbatim DOM text nodes as evidence (up to 32 nodes / 1,000 source characters);
-larger or entity-decoded pages abstain instead of claiming unsupported evidence.
-The legacy markdown parser remains the default; typed-only hidden-content
-filtering does not change `scrape_url` output.
-Model usage/cost is **provider-reported after the call**, not a certified
-pre-call USD ceiling. There is no automatic payment or model call on the default
-path. The proxy is a local service; protect the host from untrusted co-tenants.
+## Quickstart
 
-Run the small fixture quality evaluation separately from crawl-speed benchmarks:
+```console
+$ cd d0xed-architect
 
-```bash
-.venv/bin/python bench/typed_eval.py --mode deterministic
-.venv/bin/python bench/typed_eval.py --mode llm --allow-live-model
+# run the suite
+$ python3 -m unittest $(ls tests/test_devin_*.py | sed 's|/|.|; s|\.py$||')
+
+# run the bot (requires a Telegram bot token + an allowlist; see devin/deploy/)
+$ DEVIN_BOT_TOKEN=... DEVIN_ALLOWED_USERS=... python3 -m devin
 ```
 
-The nine handcrafted fixtures exercise evidence, ambiguity, abstention, hidden
-content, and mixed extraction; their scores are *not* a production accuracy
-estimate. The paid run reports actual model calls, usage, and provider-reported
-cost, or `unknown` if missing. See `docs/superpowers/plans/2026-10-10-typed-extraction.md`.
+The bot is deployable as a hardened systemd unit with the token held in an
+encrypted systemd credential — see [`devin/deploy/README.md`](devin/deploy/README.md).
 
-## Roadmap
+## Scope and non-goals
 
-- **v0.2** Ed25519 key-directory + RFC 9421 HTTP Message Signatures (real Web Bot Auth)
-- **v0.2** x402 settlement: on 402, sign a USDC transfer on Base and retry
-- **v0.3** WebMCP tool-calling (call the site's tools instead of scraping)
-- **v0.3** serve as an x402-paid endpoint (`/architect/audit`) on api.d0xeddev.com
-- **v0.4** MCP server so any agent can drive it
-- **v0.5** architecture drift: `sentinel capture` / `sentinel diff` + SVG drift map
-- **v0.5** JS/TS import extraction beyond the current best-effort pass
-- **Built:** typed, evidence-backed extraction with optional Nous Portal fallback and a separate, small extraction-quality fixture benchmark.
-- **After the initial crawler build:** package capabilities into **DEVin**, a builder/architect/debugging agent for Looper #706 with Telegram contract/code/link intake. Identity, authorization, and sandbox gates must be verified before activation. [Design and saved roadmap](docs/superpowers/specs/2026-10-10-typed-extraction-and-devin-roadmap-design.md).
+Be clear about what this is and is not:
 
-_NFA. DYOR. Built in the open._
+🟦 **Static, read-only.** Files are opened and read as text. Nothing is
+executed, built, installed, or imported. No shell, no subprocess, no eval.
+
+🟦 **No autonomous deployment.** A sealed bundle is a handoff artifact; a
+human decides what to do with it. Nothing here publishes or ships anything.
+
+🟦 **No signature / key-exchange / forward-secrecy claim.** The crypto is
+symmetric AEAD — ChaCha20-Poly1305 + scrypt — for a passphrase holder.
+Confidentiality + integrity in transit, nothing more, and it is no defense
+against a weak passphrase.
+
+🟦 **Honest language breadth, not semantics.** Language identification is by
+extension and manifest. It is not semantic understanding, and it is not a
+runtime/build compatibility guarantee.
+
+🟦 **Public site crawling only.** No private-site crawling. SSRF defenses are
+deliberate and host-pinned, but not a perfect guarantee.
+
+🟦 **Bounded everywhere.** Pages, depth, per-page bytes, total bytes, wall
+clock, findings, and upload size are all capped and fail closed.
+
+## Links
+
+🟦 [d0xeddev.com](https://d0xeddev.com)
+🟦 [@D0xedDevi0 on X](https://x.com/D0xedDevi0)
+🟦 [DEVin on Telegram](https://t.me/DEVinlooperbot)
+🟦 [The Loopers](https://t.me/theloopers)
+🟦 [GitHub](https://github.com/D0xedDevi0)
+
+MIT License — built in the open. Read-only, always.

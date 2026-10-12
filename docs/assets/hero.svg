@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-label="D0xED ARCHITECT CRAWLER — bounded, read-only code-intelligence crawler">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#001240"/>
+      <stop offset="0.55" stop-color="#000b30"/>
+      <stop offset="1" stop-color="#000614"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="380" cy="150" r="520" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#00d4ff" stop-opacity="0.16"/>
+      <stop offset="0.6" stop-color="#00d4ff" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#00d4ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="rootglow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#00d4ff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#00d4ff" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#00d4ff" stroke-opacity="0.06" stroke-width="1"/>
+    </pattern>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="7" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="glowSoft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3.5" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="420" fill="url(#bg)"/>
+  <rect width="1200" height="420" fill="url(#grid)"/>
+  <rect width="1200" height="420" fill="url(#halo)"/>
+
+  <!-- corner brackets -->
+  <g stroke="#00d4ff" stroke-opacity="0.5" stroke-width="2" fill="none">
+    <path d="M 18 18 L 18 46 M 18 18 L 46 18"/>
+    <path d="M 1182 18 L 1182 46 M 1182 18 L 1154 18"/>
+    <path d="M 18 402 L 18 374 M 18 402 L 46 402"/>
+    <path d="M 1182 402 L 1182 374 M 1182 402 L 1154 402"/>
+  </g>
+
+  <!-- wordmark -->
+  <g font-family="ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, 'Liberation Mono', monospace">
+    <text x="68" y="176" font-size="98" font-weight="700" letter-spacing="2" fill="#00d4ff" filter="url(#glow)">D0xED</text>
+    <text x="70" y="268" font-size="62" font-weight="700" letter-spacing="6" fill="#e6f6ff">ARCHITECT</text>
+    <rect x="72" y="288" width="430" height="3" fill="#00d4ff" filter="url(#glowSoft)"/>
+    <text x="72" y="330" font-size="30" font-weight="700" letter-spacing="12" fill="#00d4ff" filter="url(#glowSoft)">CRAWLER</text>
+  </g>
+  <text x="74" y="362" font-size="17" letter-spacing="1" fill="#8fd8ef" font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">bounded · read-only · static-only · evidence receipts</text>
+
+  <!-- crawler graph motif -->
+  <g>
+    <!-- edges -->
+    <g stroke="#00d4ff" stroke-width="1.4" stroke-opacity="0.28">
+      <line x1="760" y1="205" x2="892" y2="92"/>
+      <line x1="760" y1="205" x2="892" y2="205"/>
+      <line x1="760" y1="205" x2="892" y2="318"/>
+      <line x1="892" y1="92" x2="1032" y2="52"/>
+      <line x1="892" y1="92" x2="1032" y2="132"/>
+      <line x1="892" y1="205" x2="1032" y2="170"/>
+      <line x1="892" y1="205" x2="1032" y2="240"/>
+      <line x1="892" y1="318" x2="1032" y2="288"/>
+      <line x1="892" y1="318" x2="1032" y2="358"/>
+    </g>
+    <!-- highlighted path -->
+    <g stroke="#00d4ff" stroke-width="2" stroke-opacity="0.75" filter="url(#glowSoft)">
+      <line x1="760" y1="205" x2="892" y2="205"/>
+      <line x1="892" y1="205" x2="1032" y2="170"/>
+    </g>
+    <!-- off-origin dashed boundary -->
+    <line x1="1104" y1="40" x2="1104" y2="380" stroke="#00d4ff" stroke-width="1" stroke-opacity="0.35" stroke-dasharray="4 6"/>
+    <text x="1106" y="34" font-size="12" fill="#5fb8d8" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace">same-origin</text>
+    <text x="1106" y="398" font-size="12" fill="#3d7a96" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace">not followed</text>
+
+    <!-- root node -->
+    <circle cx="760" cy="205" r="40" fill="url(#rootglow)"/>
+    <circle cx="760" cy="205" r="15" fill="#00d4ff" stroke="#bff1ff" stroke-width="2" filter="url(#glow)"/>
+    <text x="760" y="262" text-anchor="middle" font-size="13" fill="#8fd8ef" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace">seed</text>
+
+    <!-- layer 1 -->
+    <g fill="#0a2f4a" stroke="#00d4ff" stroke-width="1.6">
+      <circle cx="892" cy="92" r="10"/>
+      <circle cx="892" cy="205" r="10" fill="#0f5b86" stroke="#7fe8ff" filter="url(#glowSoft)"/>
+      <circle cx="892" cy="318" r="10"/>
+    </g>
+    <text x="892" y="236" text-anchor="middle" font-size="12" fill="#7fd8ff" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace">depth 1</text>
+
+    <!-- layer 2 -->
+    <g fill="#06263c" stroke="#00d4ff" stroke-opacity="0.6" stroke-width="1.2">
+      <circle cx="1032" cy="52" r="7"/>
+      <circle cx="1032" cy="132" r="7"/>
+      <circle cx="1032" cy="170" r="7" fill="#0f5b86" stroke="#7fe8ff"/>
+      <circle cx="1032" cy="240" r="7"/>
+      <circle cx="1032" cy="288" r="7"/>
+      <circle cx="1032" cy="358" r="7"/>
+    </g>
+
+    <!-- receipt tag on the highlighted node -->
+    <rect x="1006" y="150" width="126" height="20" rx="3" fill="#001240" stroke="#00d4ff" stroke-opacity="0.6"/>
+    <text x="1012" y="164" font-size="11" fill="#7fd8ff" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace">sha256:9f2c…</text>
+  </g>
+
+  <!-- footer -->
+  <g font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace">
+    <text x="68" y="398" font-size="13" letter-spacing="1" fill="#3d7a96">github.com/D0xedDevi0/d0xed-architect</text>
+    <text x="1104" y="398" font-size="13" letter-spacing="1" fill="#3d7a96" text-anchor="end" visibility="hidden">x</text>
+  </g>
+</svg>
