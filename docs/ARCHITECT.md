@@ -185,7 +185,47 @@ mailing it somewhere is still a leak, so `build_pack` refuses a tree holding
 live credentials by default. `allow_secrets=True` is an explicit, logged,
 human decision.
 
-## 4. Threat model
+## 4. Authorization and addressing
+
+Two gates stand between a message and any work; they answer different questions.
+
+**Gate 1 — is this chat allowed at all?** (`devin/access.py`)
+
+🟦 A **private chat** is authorized by the *user* allowlist. Anyone else gets one
+bounded `Not on the list.` and no work happens.
+🟦 A **group / supergroup** is authorized by the *group* allowlist — the room is
+the principal, so **every member** may use the bot. An unallowlisted room gets
+silence (no amplification, no existence signal).
+🟦 A **bot sender** in an allowlisted room clears gate 1 and is then held to a
+stricter gate 2: only an addressed `/command@self` is accepted from a bot. That
+is the sibling-loop breaker.
+
+**Gate 2 — is the bot being addressed?** (`DevinBot._addressed_in_group`)
+
+| How you address it | Accepted |
+|---|---|
+| `/crawl@DEVinlooperbot <url>` | yes |
+| `@DEVinlooperbot /crawl <url>` (mention prefix) | yes |
+| `@DEVinlooperbot what can you do?` (bare mention) | yes — replies with the menu |
+| a reply to one of its messages | yes |
+| anything else, including a bare `/crawl` | no — silence |
+
+Telegram's group privacy setting is the outer filter: with privacy ON (the
+default, and what this deployment uses) Telegram delivers only messages that
+mention the bot, address a `/command@self` to it, or reply to it. A bare
+`/crawl` in a room is therefore never delivered and can never be answered.
+
+**Room hygiene.** Expensive commands (`/audit`, `/debug`, `/map`, `/crawl`,
+`/sitemap`, `/bundle`) take a 15-second per-person cooldown in rooms so nobody
+can use a public room as a free crawler; DMs are never throttled. A bare mention
+gets the menu at most once a minute per room.
+
+🟦 Honest limit: authorization is per-room, not per-person, and never consulted
+for *private* code. Any member of an allowlisted room can run a **public**
+audit or crawl, but private-repo work still needs the GitHub credential, and
+sealing (`/bundle`, uploaded archives) is DM-only.
+
+## 5. Threat model
 
 The design assumes everything fetched is hostile, and a human holds the
 passphrase. Defenses below are deliberate but not absolute.
@@ -213,7 +253,7 @@ A human decides what happens to the file.
 identification by extension and manifest. It is not semantic comprehension,
 and it is not a claim of runtime or build compatibility across languages.
 
-## 5. Deployment posture
+## 6. Deployment posture
 
 See [`devin/deploy/README.md`](deploy/README.md) for the full picture. The
 short version: an unprivileged `looper-devin` user, the bot token as an

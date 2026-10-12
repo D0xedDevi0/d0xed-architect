@@ -276,5 +276,97 @@ class TestBotHygiene(unittest.TestCase):
         self.assertTrue(bot._is_auth_error(TelegramError("getUpdates failed: Unauthorized")))
 
 
+class TestGroupReachability(unittest.TestCase):
+    """A room the bot was added to has to actually WORK: the room is the
+    principal (any member is served), a human's natural @mention counts as
+    addressing him, and a busy room cannot use him as a free crawler."""
+
+    OTHER_USER = 424242
+
+    @staticmethod
+    def bot_sender_update(text, update_id=9):
+        upd = group_update(update_id, 777000, GROUP_ID, text)
+        upd["message"]["from"]["is_bot"] = True
+        return upd
+
+    def test_non_owner_member_of_allowlisted_group_is_served(self):
+        bot, _, _ = make_bot()
+        r = bot.handle_update(group_update(
+            1, self.OTHER_USER, GROUP_ID, f"/help@{BOT_USERNAME}"))
+        self.assertEqual(r.action, "replied")
+        self.assertEqual(r.detail, "help")
+
+    def test_plain_mention_gets_the_menu(self):
+        bot, _, tg = make_bot()
+        r = bot.handle_update(group_update(
+            1, self.OTHER_USER, GROUP_ID, "@DEVinlooperbot what do you do?"))
+        self.assertEqual(r.action, "replied")
+        self.assertEqual(r.detail, "hint")
+        self.assertIn(BOT_USERNAME, tg.sent[0]["text"])
+        self.assertIn("/audit", tg.sent[0]["text"])
+
+    def test_mention_prefixed_command_runs_the_command(self):
+        # "@DEVinlooperbot /audit <url>" is how a person actually types it; the
+        # mention must not shadow the command behind it.
+        bot, gh, _ = make_bot()
+        r = bot.handle_update(group_update(
+            1, self.OTHER_USER, GROUP_ID,
+            f"@{BOT_USERNAME} /audit https://github.com/o/r"))
+        self.assertTrue(r.detail.startswith("audit:o/r"))
+        self.assertEqual(len(gh.calls), 2)
+
+    def test_menu_hint_is_throttled_per_chat(self):
+        bot, _, tg = make_bot()
+        first = bot.handle_update(group_update(
+            1, self.OTHER_USER, GROUP_ID, "@DEVinlooperbot hi"))
+        second = bot.handle_update(group_update(
+            2, self.OTHER_USER, GROUP_ID, "@DEVinlooperbot you there?"))
+        self.assertEqual(first.detail, "hint")
+        self.assertEqual(second.detail, "hint-cooldown")
+        self.assertEqual(len(tg.sent), 1)   # one hint, not two
+
+    def test_bot_sender_bare_mention_is_ignored(self):
+        # Sibling bots must not be able to start a conversation with a mention.
+        bot, _, tg = make_bot()
+        r = bot.handle_update(self.bot_sender_update("@DEVinlooperbot hello"))
+        self.assertEqual(r.action, "ignored")
+        self.assertEqual(tg.sent, [])
+
+    def test_bot_sender_addressed_command_is_served(self):
+        bot, _, _ = make_bot()
+        r = bot.handle_update(self.bot_sender_update(f"/help@{BOT_USERNAME}"))
+        self.assertEqual(r.action, "replied")
+        self.assertEqual(r.detail, "help")
+
+    def test_expensive_command_is_throttled_per_user(self):
+        now = [1000.0]
+        cfg = Config(token=FAKE_TOKEN, allowed_user_ids=(USER_ID,),
+                     allowed_group_ids=(GROUP_ID,), limits=Limits(),
+                     bot_id=BOT_ID, bot_username=BOT_USERNAME)
+        gh = FakeGithub(tarball=build_tarball({"src/app.py": b"x = 1\n"}))
+        bot = DevinBot(cfg, FakeTelegram(), gh, clock=lambda: now[0])
+
+        def audit(uid):
+            return bot.handle_update(group_update(
+                uid, self.OTHER_USER, GROUP_ID,
+                f"/audit@{BOT_USERNAME} https://github.com/o/r"))
+
+        first = audit(1)
+        now[0] += 5
+        second = audit(2)
+        now[0] += 30
+        third = audit(3)
+        self.assertTrue(first.detail.startswith("audit:"))
+        self.assertEqual(second.detail, "cooldown:audit")
+        self.assertTrue(third.detail.startswith("audit:"))
+
+    def test_cheap_commands_are_never_throttled(self):
+        bot, _, tg = make_bot()
+        for i in range(1, 4):
+            self.assertEqual(
+                bot.handle_update(dm_update(i, USER_ID, "/help")).detail, "help")
+        self.assertEqual(len(tg.sent), 3)
+
+
 if __name__ == "__main__":
     unittest.main()

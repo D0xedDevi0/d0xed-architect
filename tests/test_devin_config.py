@@ -55,6 +55,14 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(cfg.allowed_user_ids, (USER_ID, 123))
         self.assertEqual(cfg.allowed_group_ids, (GROUP_ID, -999))
 
+    def test_whitespace_separated_groups(self):
+        # systemd Environment= passes a QUOTED value through verbatim, so a unit
+        # can list several rooms; an unquoted line is truncated by systemd to
+        # its first token, which silently dropped a whole group.
+        cfg = load_config({TOKEN_ENV: FAKE_TOKEN, USERS_ENV: str(USER_ID),
+                           GROUPS_ENV: f"{GROUP_ID} -999;"})
+        self.assertEqual(cfg.allowed_group_ids, (GROUP_ID, -999))
+
     def test_identity_pins_parsed(self):
         cfg = load_config({TOKEN_ENV: FAKE_TOKEN, USERS_ENV: str(USER_ID),
                            BOT_ID_ENV: str(BOT_ID),

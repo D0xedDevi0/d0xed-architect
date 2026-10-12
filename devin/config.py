@@ -76,7 +76,11 @@ def _parse_ids(name: str, value: str | None) -> tuple[int, ...] | None:
     if value is None or value.strip() == "":
         return None
     ids: list[int] = []
-    for part in value.split(","):
+    # Commas are the documented form, but systemd `Environment=` splits a value
+    # on whitespace unless it is quoted — and an unquoted multi-value assignment
+    # is silently truncated to its first token by systemd itself. Accept commas,
+    # whitespace, and semicolons so either spelling of the unit works.
+    for part in re.split(r"[,\s;]+", value.strip()):
         part = part.strip()
         if not part:
             continue

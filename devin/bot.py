@@ -9,6 +9,8 @@ request URL and is never logged, echoed, or sent as message text.
 from __future__ import annotations
 
 import json
+import re
+import time
 from dataclasses import dataclass
 
 from .access import AccessDecision, Authorizer
@@ -25,12 +27,19 @@ from .pack import (PackError, PackLimits, PackRefused, build_pack, pack_github,
                    render_pack)
 from .upload import (MAX_UPLOAD_BYTES, UploadDenied, cleanup, download_cap,
                      intake, parse_document, safe_file_path, sniff)
-from .report import (PHOTO, render_deep_report, render_help, render_link,
-                     render_lore, render_report, render_site_map, render_start)
+from .report import (PHOTO, render_deep_report, render_help, render_hint,
+                     render_link, render_lore, render_report, render_site_map,
+                     render_start)
 
 TELEGRAM_API = "https://api.telegram.org"
 POLL_ERROR_BACKOFF = 2.0
 MAX_BACKOFF = 30.0
+
+# Commands that spend someone else's bandwidth or CPU take a per-(chat,user)
+# cooldown: a group shares one room, so the budget is per person.
+EXPENSIVE_COMMANDS = ("audit", "debug", "map", "crawl", "sitemap", "bundle")
+USER_COOLDOWN_S = 15.0
+HINT_COOLDOWN_S = 60.0
 
 
 class TelegramError(Exception):
@@ -47,7 +56,8 @@ class HandledResult:
 class DevinBot:
     def __init__(self, config: Config, transport, github_fetch, public_fetch=None,
                  bundle_passphrase: str | None = None, file_get=None,
-                 transport_max_bytes: int = MAX_UPLOAD_BYTES):
+                 transport_max_bytes: int = MAX_UPLOAD_BYTES, clock=None,
+                 verbose: bool = False):
         self.config = config
         self.authorizer = Authorizer(config.allowed_user_ids,
                                      config.allowed_group_ids)
@@ -62,6 +72,14 @@ class DevinBot:
         self.file_get = file_get
         self.transport_max_bytes = int(transport_max_bytes)
         self._backoff = 0.0
+        # Shared-room hygiene: expensive commands are throttled per (chat, user)
+        # and an addressed-but-commandless mention gets the menu at most once a
+        # minute per chat, so a busy room cannot turn DEVin into a chatterbox.
+        self._clock = clock or time.monotonic
+        self._last_use: dict[tuple[int | None, int | None], float] = {}
+        self._last_hint: dict[int | None, float] = {}
+        # Per-update lines go to the journal in production; tests leave it off.
+        self.verbose = bool(verbose)
         # Live identity, adopted from getMe at startup; seeded from config so
         # group addressing can be unit-tested without a network round trip.
         self.bot_id = config.bot_id
@@ -142,28 +160,112 @@ class DevinBot:
         # Adopt the live identity for group @mention addressing.
         self.bot_id = bot_id
         self.bot_username = username
+        self._log("DEVin online: @%s id=%s dm_allow=%d groups=%s sealing=%s "
+                  "github=%s can_read_all_group_messages=%s"
+                  % (username, bot_id, len(self.config.allowed_user_ids),
+                     list(self.config.allowed_group_ids),
+                     "yes" if self.bundle_passphrase else "NO",
+                     "yes" if self.config.github_token else "no",
+                     me.get("can_read_all_group_messages")))
+        if me.get("can_read_all_group_messages") is False and \
+                self.config.allowed_group_ids:
+            self._log("note: group privacy is ON, so Telegram delivers only "
+                      "messages that mention @%s, address /cmd@%s directly, or "
+                      "reply to him. A bare /command in a group never arrives."
+                      % (username, username))
         return {"id": bot_id, "username": username}
 
     def _addressed_in_group(self, msg: dict, text: str | None) -> bool:
-        """In a group the bot acts only when explicitly addressed: a command
-        carrying its own ``@username`` mention, or a reply to one of its
-        messages. Otherwise it stays silent (shared-group etiquette: several
-        bots live in the same room and must not all answer one /command)."""
-        if text:
-            head = text.strip().split(None, 1)[0] if text.strip() else ""
-            if head.startswith("/") and "@" in head:
-                mention = head.split("@", 1)[1].strip().lower()
-                if self.bot_username and mention == self.bot_username.lower():
-                    return True
+        """In a group the bot acts only when explicitly addressed.
+
+        A human addresses DEVin the way a person actually would: an ``@username``
+        mention (anywhere in the message, and that is the only kind Telegram even
+        delivers under group privacy), a ``/cmd@username`` command, or a reply to
+        one of his messages. A BOT sender gets only the addressed-command form —
+        siblings must not be able to start a conversation with a bare mention
+        (that is the loop breaker, and it stays strict on purpose).
+        """
+        me = (self.bot_username or "").lower()
+        sender_is_bot = bool((msg.get("from") or {}).get("is_bot"))
+
+        head = ""
+        if text and text.strip():
+            head = text.strip().split(None, 1)[0]
+        if head.startswith("/") and "@" in head:
+            if me and head.split("@", 1)[1].strip().lower() == me:
+                return True
+
+        if sender_is_bot:
+            return False
+
         reply = msg.get("reply_to_message") or {}
-        frm = reply.get("from") or {}
-        if frm.get("is_bot"):
-            if self.bot_id is not None and frm.get("id") == self.bot_id:
+        rfrm = reply.get("from") or {}
+        if rfrm.get("is_bot"):
+            if self.bot_id is not None and rfrm.get("id") == self.bot_id:
                 return True
-            if (self.bot_username and frm.get("username")
-                    and frm["username"].lower() == self.bot_username.lower()):
+            if me and (rfrm.get("username") or "").lower() == me:
                 return True
+
+        return bool(text and me and f"@{me}" in text.lower())
+
+    def _unmention(self, text: str | None) -> str | None:
+        """Drop this bot's own @username before parsing, so the natural
+        "@DEVinlooperbot /crawl <url>" does not shadow the command behind it.
+        Called AFTER the addressed-check, which needs the original mention."""
+        if not text or not self.bot_username:
+            return text
+        stripped = re.sub(r"@%s\b" % re.escape(self.bot_username), " ", text,
+                          flags=re.IGNORECASE).strip()
+        return stripped or text
+
+    def _throttled(self, decision: AccessDecision) -> bool:
+        """True when this caller asked for another expensive command too soon.
+
+        Only rooms are policed: a DM is already allowlisted to named people, and
+        throttling the owner in his own chat would only make the bot feel broken
+        (running /audit then /debug back to back is normal there)."""
+        if decision.chat_type not in ("group", "supergroup"):
+            return False
+        key = (decision.chat_id, decision.user_id)
+        now = self._clock()
+        last = self._last_use.get(key)
+        if last is not None and (now - last) < USER_COOLDOWN_S:
+            return True
+        self._last_use[key] = now
         return False
+
+    def _hint(self, uid, decision: AccessDecision) -> HandledResult:
+        """Answer an addressed-but-commandless mention with the menu, bounded to
+        once a minute per chat. Staying silent here is what made DEVin look dead
+        to a room that had already done the right thing by mentioning him."""
+        now = self._clock()
+        last = self._last_hint.get(decision.chat_id)
+        if last is not None and (now - last) < HINT_COOLDOWN_S:
+            return HandledResult(uid, "ignored", "hint-cooldown")
+        self._last_hint[decision.chat_id] = now
+        self._reply(decision.chat_id, render_hint(self.bot_username),
+                    reply_to=decision.message_id, thread_id=decision.thread_id)
+        return HandledResult(uid, "replied", "hint")
+
+    # ── journal lines (no message text, no secrets) ─────────────────────────
+
+    def _log(self, line: str) -> None:
+        if self.verbose:
+            print(line, flush=True)
+
+    def _log_update(self, update: dict, res: HandledResult) -> None:
+        """One line per update so silence is diagnosable from the journal."""
+        msg = update.get("message") or {}
+        chat = msg.get("chat") or {}
+        frm = msg.get("from") or {}
+        text = msg.get("text")
+        kind = (text.strip().split(None, 1)[0][:24] if text
+                else ("<document>" if msg.get("document") else "<non-text>"))
+        self._log("update=%s chat=%s type=%s from=%s bot=%s thread=%s "
+                  "kind=%s -> %s (%s)"
+                  % (update.get("update_id"), chat.get("id"), chat.get("type"),
+                     frm.get("id"), bool(frm.get("is_bot")),
+                     msg.get("message_thread_id"), kind, res.action, res.detail))
 
     # ── update handling ─────────────────────────────────────────────────────
 
@@ -219,7 +321,18 @@ class DevinBot:
         if not text and isinstance(msg.get("document"), dict):
             return self._handle_document(uid, msg, decision)
 
-        cmd = parse_command(text, self.config.limits.max_message_len)
+        cmd = parse_command(self._unmention(text),
+                            self.config.limits.max_message_len)
+
+        if cmd.kind in EXPENSIVE_COMMANDS and self._throttled(decision):
+            return HandledResult(uid, "ignored", f"cooldown:{cmd.kind}")
+
+        if cmd.kind == "reject" and cmd.error == "not a command":
+            # Addressed in a room without a command. Answer with the menu (bounded
+            # per chat) instead of a bare refusal, so a room that mentioned him
+            # gets something usable back.
+            if decision.chat_type in ("group", "supergroup"):
+                return self._hint(uid, decision)
 
         if cmd.kind == "start":
             self._send_welcome(decision, cmd.arg)
@@ -604,7 +717,9 @@ class DevinBot:
             if uid is None:
                 continue
             offset = uid + 1
-            results.append(self.handle_update(u))
+            res = self.handle_update(u)
+            self._log_update(u, res)
+            results.append(res)
         return offset, results
 
     def run(self, poll_timeout: int | None = None):
@@ -624,7 +739,7 @@ class DevinBot:
                     if uid is None:
                         continue
                     offset = uid + 1
-                    self.handle_update(u)
+                    self._log_update(u, self.handle_update(u))
             except TelegramError as e:
                 if self._is_auth_error(e):
                     raise            # fail-closed: invalid/revoked token -> stop
