@@ -75,7 +75,20 @@ try:
              len(report.findings)))
     print("languages:", sorted(report.languages)[:8])
 
-    res = build_pack(root, PW, label="devin-app")
+    # This tree is DEVin's OWN repo, whose test fixtures are deliberately
+    # correctly-shaped credentials, so the default refusal fires. That refusal
+    # IS the point of the check; the override is the documented escape hatch.
+    allow = os.environ.get("DEVIN_LIVE_ALLOW_SECRETS") == "1"
+    try:
+        res = build_pack(root, PW, label="devin-app")
+        print("seal without override: SUCCEEDED (expected a refusal here)")
+    except Exception as e:
+        print("seal refused as designed:", type(e).__name__)
+        print("  refusal mentions no secret value:",
+              "AKIA" not in str(e))
+        if not allow:
+            raise SystemExit(0)
+    res = build_pack(root, PW, label="devin-app", allow_secrets=True)
     print("sealed: files=%d bytes=%d is_bundle=%s"
           % (res.files, len(res.blob), is_bundle(res.blob)))
     print("plaintext in bundle:", any(
