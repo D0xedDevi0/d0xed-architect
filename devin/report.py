@@ -121,8 +121,19 @@ def render_report(out: AuditOutcome, max_len: int = 3600) -> str:
          f"med={sev.get('medium', 0)} low={sev.get('low', 0)}"),
         f"manifest: {out.manifest_root or '-'}",
     ]
+    langs = getattr(out, "languages", None)
+    if langs:
+        lines.append("languages: " + ", ".join(
+            f"{k}{v}" for k, v in sorted(langs.items(), key=lambda t: -t[1])[:12]))
+        lines.append(f"loc: {getattr(out, 'loc', 0)}   engine: "
+                     f"{getattr(out, 'engine', '-')}")
+    sbom = getattr(out, "sbom", None)
+    if sbom:
+        lines.append(f"sbom: {len(sbom)} components")
     if out.truncated:
         lines.append("(limits reached — results truncated)")
+    for n in (getattr(out, "notes", None) or [])[:6]:
+        lines.append(f"note: {n}")
     if not out.findings:
         lines.append("no findings")
     for f in out.findings:
@@ -158,6 +169,31 @@ def render_deep_report(out: DeepReport, max_len: int = 3600) -> str:
         lines.append("workflows: " + ", ".join(out.workflows[:10]))
     if out.tests:
         lines.append(f"tests({len(out.tests)}): " + ", ".join(out.tests[:10]))
+    if getattr(out, "loc", 0):
+        lines.append(f"loc: {out.loc}   suppressions: "
+                     f"{getattr(out, 'suppressions', 0)}")
+    sbom = getattr(out, "sbom", None)
+    if sbom:
+        eco: dict = {}
+        for e, _n, _v in sbom:
+            eco[e] = eco.get(e, 0) + 1
+        lines.append("sbom: " + ", ".join(
+            f"{k}={v}" for k, v in sorted(eco.items())) +
+            "  e.g. " + ", ".join(f"{n}@{v}" for _e, n, v in sbom[:6]))
+    lockfiles = getattr(out, "lockfiles", None)
+    if lockfiles:
+        lines.append(f"lockfiles: {len(lockfiles)}")
+    hotspots = getattr(out, "hotspots", None)
+    if hotspots:
+        lines.append("hotspots (complexity):")
+        for path, score, note in hotspots[:6]:
+            lines.append(f"  {score:4d} {path}  ({note})")
+    iac = getattr(out, "iac", None)
+    if iac:
+        lines.append(f"iac/devops({len(iac)}): " + ", ".join(iac[:8]))
+    lic = getattr(out, "licenses", None)
+    if lic:
+        lines.append("licenses: " + ", ".join(lic[:5]))
     lines.append(f"TODO: {out.todo_count}   FIXME: {out.fixme_count}")
     lines.append(
         f"findings: crit={sev.get('critical', 0)} high={sev.get('high', 0)} "
@@ -166,6 +202,8 @@ def render_deep_report(out: DeepReport, max_len: int = 3600) -> str:
         lines.append(f"manifest: {out.manifest_root}")
     if out.truncated:
         lines.append("(limits reached — results truncated)")
+    for n in (getattr(out, "notes", None) or [])[:8]:
+        lines.append(f"note: {n}")
     for f in out.findings:
         lines.append(f"{f.severity:8s} {f.path}:{f.line} [{f.rule}]")
         lines.append(f"    {f.snippet}")

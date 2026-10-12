@@ -22,6 +22,8 @@ from architect.audit import (CODE_EXT, SECRET_RULES, SKIP_DIRS, RISK_RULES,
 from architect.evidence import (Evidence, manifest_root, severity_counts,
                                 sha256_bytes)
 
+from .analysis import AnalysisLimits, analyze_tree, extract_tarball
+
 _REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 _SNIPPET_MAX = 200
@@ -74,6 +76,14 @@ class AuditOutcome:
     findings: list = field(default_factory=list)
     truncated: bool = False
     manifest_root: str = ""
+    # polyglot engine additions (any language)
+    languages: dict = field(default_factory=dict)
+    loc: int = 0
+    sbom: list = field(default_factory=list)
+    hotspots: list = field(default_factory=list)
+    licenses: list = field(default_factory=list)
+    notes: list = field(default_factory=list)
+    engine: str = "architect"
 
     def severity_counts(self) -> dict:
         return severity_counts(self.findings)
@@ -123,6 +133,99 @@ def _skip_path(rel: str) -> bool:
         return True
     parts = rel.split("/")
     return any(seg in SKIP_DIRS or seg.startswith(".venv") for seg in parts)
+
+
+def _evidence_from_finding(root: str, f, cache: dict) -> Evidence | None:
+    """Convert an `architect.audit.Finding` into masked, receipted Evidence."""
+    import os as _os
+    rel = f.path.replace(_os.sep, "/")
+    if rel not in cache:
+        try:
+            with open(_os.path.join(root, rel), "rb") as fh:
+                raw = fh.read()
+        except OSError:
+            cache[rel] = (None, [])
+            return None
+        cache[rel] = (sha256_bytes(raw),
+                      raw.decode("utf-8", "replace").splitlines())
+    fhash, lines = cache[rel]
+    if not fhash or f.line < 1 or f.line > len(lines):
+        return None
+    snippet = _masked_snippet(lines[f.line - 1])
+    return Evidence(rule=str(f.kind), severity=f.severity, path=rel,
+                    line=f.line, snippet=snippet, file_sha256=fhash,
+                    snippet_sha256=sha256_bytes(snippet.encode()),
+                    detail=getattr(f, "detail", "") or "")
+
+
+def inspect_tarball_full(data: bytes, owner: str, repo: str, ref: str,
+                         limits: AuditLimits) -> AuditOutcome:
+    """Full-polyglot static audit of an archive: architect rules + the
+    any-language engine, merged, deduped, receipted. Nothing is executed."""
+    import os as _os
+    import shutil
+
+    alimits = AnalysisLimits(max_files=limits.max_files,
+                             max_file_bytes=limits.max_file_bytes,
+                             max_total_bytes=limits.max_total_bytes,
+                             max_findings=limits.max_findings)
+    root, trunc = extract_tarball(data, alimits)
+    if root is None:
+        raise AuditDenied("not a readable archive")
+    out = AuditOutcome(owner=owner, repo=repo, ref=ref, engine="polyglot")
+    try:
+        # 1. existing architect rule pack (back-compat rule names)
+        try:
+            from architect.audit import audit_repo
+            from architect.graph import Graph
+            res = audit_repo(root, graph=Graph(":memory:"),
+                             max_files=limits.max_files)
+            arch_findings = res.findings
+            out.files_scanned = res.files_scanned
+            out.bytes_scanned = res.bytes_scanned
+        except Exception:
+            arch_findings = []
+        # 2. the polyglot engine (any language, big pack)
+        rep = analyze_tree(root, alimits)
+
+        cache: dict = {}
+        merged: list = []
+        seen: set = set()
+        for f in arch_findings:
+            e = _evidence_from_finding(root, f, cache)
+            if e is None:
+                continue
+            key = (e.rule, e.path, e.line, e.snippet_sha256)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(e)
+        for e in rep.findings:
+            key = (e.rule, e.path, e.line, e.snippet_sha256)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(e)
+
+        rank = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
+        merged.sort(key=lambda e: (rank.get(e.severity, 9), e.path, e.line))
+        if len(merged) > limits.max_findings:
+            trunc = True
+            merged = merged[:limits.max_findings]
+        out.findings = merged
+        out.truncated = trunc or rep.truncated
+        out.manifest_root = manifest_root(merged)
+        out.files_scanned = max(out.files_scanned, rep.files_scanned)
+        out.bytes_scanned = max(out.bytes_scanned, rep.bytes_scanned)
+        out.languages = dict(rep.languages)
+        out.loc = rep.loc
+        out.sbom = list(rep.sbom)
+        out.hotspots = list(rep.hotspots)
+        out.licenses = list(rep.licenses)
+        out.notes = list(rep.notes)
+        return out
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def _masked_snippet(line_text: str) -> str:
@@ -267,8 +370,8 @@ def audit_public_repo(url: str, fetch, limits: AuditLimits | None = None,
             raise AuditDenied(f"repository archive unavailable (HTTP {resp.status})")
         if len(resp.body) > limits.max_total_bytes:
             raise AuditDenied("repository archive too large")
-        return inspect_tarball(resp.body, ref.owner, ref.repo, default_branch,
-                               limits)
+        return inspect_tarball_full(resp.body, ref.owner, ref.repo,
+                                    default_branch, limits)
     except AuditDenied:
         raise
     except safe_fetch.AccessDenied as e:

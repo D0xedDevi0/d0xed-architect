@@ -31,7 +31,7 @@ class TestDeepReport(unittest.TestCase):
         gh = FakeGithub(tarball=sample_tarball(), branch="main")
         rep = deep_repo_report("https://github.com/owner/repo", gh)
         self.assertEqual((rep.owner, rep.repo, rep.ref), ("owner", "repo", "main"))
-        self.assertIn(".py", rep.languages)
+        self.assertIn("Python", rep.languages)
         self.assertIn("requirements.txt", rep.manifests)
         self.assertIn("flask==3.0", rep.manifests["requirements.txt"])
         self.assertIn("react", rep.manifests["package.json"])

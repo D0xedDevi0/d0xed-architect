@@ -35,9 +35,12 @@ from architect.evidence import (Evidence, manifest_root, severity_counts,
                                 sha256_bytes)
 from architect.graph import Graph
 
+from .analysis import AnalysisLimits, analyze_tree
 from .github_audit import (AuditDenied, AuditLimits, _BRANCH_RE, _auth_headers,
                            _masked_snippet, _rel_path, _skip_path,
                            parse_repo_url)
+
+_SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
 # Secondary bounded-output caps (safety limits, not preferences).
 _MAX_TOP_IMPORTS = 10
@@ -77,6 +80,17 @@ class DeepReport:
     findings: list = field(default_factory=list)      # Evidence
     truncated: bool = False
     manifest_root: str = ""
+    # ── polyglot engine additions (any language) ──
+    loc: int = 0
+    sbom: list = field(default_factory=list)          # [(ecosystem, name, ver)]
+    hotspots: list = field(default_factory=list)      # [(path, score, note)]
+    licenses: list = field(default_factory=list)
+    iac: list = field(default_factory=list)
+    lockfiles: list = field(default_factory=list)
+    suppressions: int = 0
+    key_files: list = field(default_factory=list)
+    notes: list = field(default_factory=list)         # project-level signals
+    engine: str = "architect+polyglot"
 
     def severity_counts(self) -> dict:
         return severity_counts(self.findings)
@@ -448,16 +462,61 @@ def deep_repo_report(url: str, fetch, limits: AuditLimits | None = None,
 
         _metadata_scan(root, report)
 
+        # ── polyglot engine pass over the SAME tree ───────────────────────
+        alimits = AnalysisLimits(
+            max_files=limits.max_files,
+            max_file_bytes=limits.max_file_bytes,
+            max_total_bytes=limits.max_total_bytes,
+            max_findings=limits.max_findings)
+        eng = analyze_tree(root, alimits)
+
         cache: dict = {}
-        ev = []
-        for f in res.findings[:limits.max_findings]:
+        merged: list = []
+        seen: set = set()
+        for f in res.findings:
             e = _to_evidence(root, f, cache)
-            if e is not None:
-                ev.append(e)
-        if len(res.findings) > limits.max_findings:
+            if e is None:
+                continue
+            key = (e.rule, e.path, e.line, e.snippet_sha256)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(e)
+        for e in eng.findings:
+            key = (e.rule, e.path, e.line, e.snippet_sha256)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(e)
+        merged.sort(key=lambda e: (_SEV_RANK.get(e.severity, 9), e.path, e.line))
+        if len(merged) > limits.max_findings:
             report.truncated = True
-        report.findings = ev
-        report.manifest_root = manifest_root(ev)
+            merged = merged[:limits.max_findings]
+
+        # engine metadata: richer languages, SBOM, hotspots, IaC, licenses
+        report.languages = dict(eng.languages) or report.languages
+        report.loc = eng.loc
+        report.sbom = list(eng.sbom)
+        report.hotspots = list(eng.hotspots)
+        report.licenses = list(eng.licenses)
+        report.iac = list(eng.iac)
+        report.lockfiles = list(eng.lockfiles)
+        report.suppressions = eng.suppressions
+        report.key_files = list(eng.key_files)
+        report.notes = list(eng.notes)
+        report.entrypoints = sorted(set(report.entrypoints)
+                                    | set(eng.entrypoints))[:40]
+        report.todo_count = max(report.todo_count, eng.todos)
+        report.fixme_count = max(report.fixme_count, eng.fixmes)
+        report.tests = sorted(set(report.tests) | set(eng.tests))[:_MAX_TESTS]
+        report.workflows = sorted(set(report.workflows)
+                                  | set(eng.ci))[:_MAX_WORKFLOWS]
+        for name, deps in eng.manifests.items():
+            report.manifests.setdefault(name, deps)
+        report.truncated = report.truncated or eng.truncated
+
+        report.findings = merged
+        report.manifest_root = manifest_root(merged)
         return report
     except AuditDenied:
         raise
