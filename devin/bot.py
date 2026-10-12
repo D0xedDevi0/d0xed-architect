@@ -18,8 +18,8 @@ from .crawl_cmd import MapDenied, MapLimits, site_map
 from .deep_audit import deep_repo_report
 from .doctor import render_doctor
 from .github_audit import AuditDenied, AuditLimits, audit_public_repo
-from .report import (render_deep_report, render_help, render_report,
-                     render_site_map, render_start)
+from .report import (PHOTO, render_deep_report, render_help, render_lore,
+                     render_report, render_site_map, render_start)
 
 TELEGRAM_API = "https://api.telegram.org"
 POLL_ERROR_BACKOFF = 2.0
@@ -77,6 +77,23 @@ class DevinBot:
         if thread_id is not None:
             params["message_thread_id"] = thread_id
         self._call("sendMessage", params)
+
+    def _send_welcome(self, decision: AccessDecision):
+        """Open with Looper #706's art + the welcome caption. Telegram fetches
+        the image URL itself (the bot makes no outbound request for it). Falls
+        back to a plain sendMessage if the photo is rejected, so /start always
+        lands something."""
+        params = {"chat_id": decision.chat_id, "photo": PHOTO,
+                  "caption": render_start()[:1024]}   # telegram caption cap
+        if decision.message_id is not None:
+            params["reply_to_message_id"] = decision.message_id
+        if decision.thread_id is not None:
+            params["message_thread_id"] = decision.thread_id
+        try:
+            self._call("sendPhoto", params)
+        except TelegramError:
+            self._reply(decision.chat_id, render_start(),
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
 
     # ── startup identity guard (fail-closed) ────────────────────────────────
 
@@ -150,7 +167,7 @@ class DevinBot:
             # denied groups/channels get silence (no amplification).
             if chat.get("type") == "private" and decision.chat_id is not None:
                 try:
-                    self._reply(decision.chat_id, "Access denied.")
+                    self._reply(decision.chat_id, "Not on the list.")
                 except TelegramError:
                     pass
             return HandledResult(uid, "denied", decision.reason)
@@ -168,13 +185,17 @@ class DevinBot:
         cmd = parse_command(text, self.config.limits.max_message_len)
 
         if cmd.kind == "start":
-            self._reply(decision.chat_id, render_start(),
-                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            self._send_welcome(decision)
             return HandledResult(uid, "replied", "start")
         if cmd.kind == "help":
             self._reply(decision.chat_id, render_help(),
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", "help")
+        if cmd.kind == "lore":
+            self._reply(decision.chat_id,
+                        render_lore(max_len=self.config.limits.max_reply_len),
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "lore")
         if cmd.kind == "audit":
             return self._handle_audit(uid, cmd, decision)
         if cmd.kind == "debug":
@@ -200,11 +221,11 @@ class DevinBot:
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", f"audit:{outcome.owner}/{outcome.repo}")
         except AuditDenied as e:
-            self._reply(decision.chat_id, f"audit refused: {str(e)[:300]}",
+            self._reply(decision.chat_id, f"audit refused — {str(e)[:300]}",
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", "audit-denied")
         except Exception:
-            self._reply(decision.chat_id, "audit failed.",
+            self._reply(decision.chat_id, "No read — try again.",
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", "audit-error")
 
@@ -220,17 +241,17 @@ class DevinBot:
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", f"debug:{outcome.owner}/{outcome.repo}")
         except AuditDenied as e:
-            self._reply(decision.chat_id, f"debug refused: {str(e)[:300]}",
+            self._reply(decision.chat_id, f"debug refused — {str(e)[:300]}",
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", "debug-denied")
         except Exception:
-            self._reply(decision.chat_id, "debug failed.",
+            self._reply(decision.chat_id, "No read — try again.",
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", "debug-error")
 
     def _handle_map(self, uid, cmd: Command, decision: AccessDecision) -> HandledResult:
         if self.public_fetch is None:
-            self._reply(decision.chat_id, "map unavailable.",
+            self._reply(decision.chat_id, "No map here.",
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", "map-unavailable")
         try:
@@ -241,11 +262,11 @@ class DevinBot:
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", f"map:{sm.url}")
         except MapDenied as e:
-            self._reply(decision.chat_id, f"map refused: {str(e)[:300]}",
+            self._reply(decision.chat_id, f"map refused — {str(e)[:300]}",
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", "map-denied")
         except Exception:
-            self._reply(decision.chat_id, "map failed.",
+            self._reply(decision.chat_id, "No map — try again.",
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", "map-error")
 
@@ -260,7 +281,7 @@ class DevinBot:
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", "doctor")
         except TelegramError:
-            self._reply(decision.chat_id, "doctor failed.",
+            self._reply(decision.chat_id, "Self-check failed.",
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", "doctor-error")
 

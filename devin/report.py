@@ -7,6 +7,7 @@ snippets are already masked upstream in `github_audit`/`deep_audit`.
 from __future__ import annotations
 
 from .crawl_cmd import SiteMap
+from . import persona
 from .deep_audit import DeepReport
 from .github_audit import AuditOutcome
 
@@ -29,9 +30,14 @@ DESCRIPTION = (
 ABOUT = ("Looper #706. Reads state, not vibes. Static-only repo + site "
          "auditor — never runs your code.")
 
+# Looper #706's art, sent as the /start welcome (Telegram fetches the URL, so
+# the bot itself never makes an outbound request for it).
+PHOTO = persona.IMAGE
+
 COMMANDS = [
     {"command": "start", "description": "Show the intro"},
     {"command": "help", "description": "Commands and how to use them"},
+    {"command": "lore", "description": "Who DEVin is (on-chain identity)"},
     {"command": "audit", "description": "Read a GitHub repo cold (secrets, risks)"},
     {"command": "debug", "description": "Deep architecture / debug report"},
     {"command": "map", "description": "Map a public site (robots first)"},
@@ -45,7 +51,7 @@ START_TEXT = (
     "/audit <github-url> — read a repo cold: secrets, risky patterns, receipts.\n"
     "/debug <github-url> — architecture: languages, imports, cycles, CI.\n"
     "/map <url> — map a public site, robots first.\n"
-    "/doctor — self-check.   /help — the rest.\n\n"
+    "/lore — who I am.   /doctor — self-check.   /help — the rest.\n\n"
     "Static only. I don't run your code, I don't spend, I don't touch wallets.\n"
     "Wire a tool. Debug a workflow. Ship an integration."
 )
@@ -60,6 +66,7 @@ HELP_TEXT = (
     "                   languages, imports, cycles, manifests, CI, tests\n"
     "/map <url>       — /map https://example.com (public site only)\n"
     "                   robots first; same-origin links only\n"
+    "/lore            — who I am (on-chain identity)\n"
     "/doctor          — self-diagnostics\n\n"
     "In a group, address me: /audit@DEVinlooperbot https://github.com/o/r\n"
     "Source is read, never executed."
@@ -78,6 +85,30 @@ def _truncate(text: str, max_len: int) -> str:
     if len(text) > max_len:
         text = text[: max_len - 20] + "\n…(truncated)"
     return text
+
+
+def render_lore(max_len: int = 3600) -> str:
+    """Who DEVin is — his on-chain identity, stated without fetching anything."""
+    lines = [
+        f"🟦 DEVin — Looper #{persona.LOOPER_ID} · ERC-8004 agent {persona.AGENT_ID}",
+        f"{persona.AGENT_CLASS} · {persona.SECONDARY_CLASS} · {persona.SPECIALIZATION}",
+        "",
+        f"origin: {persona.ORIGIN}",
+        f"mission: {persona.MISSION}",
+        "",
+        "trait stack:",
+    ]
+    lines += [f"  {layer}: {trait}" for layer, trait in persona.TRAITS]
+    lines += [
+        "",
+        f"risk {persona.RISK} · autonomy {persona.AUTONOMY}",
+        f"codex: {persona.CODEX}",
+        f"sheet: {persona.HELIXA}",
+        "",
+        "first missions: " + " · ".join(persona.FIRST_MISSIONS),
+        persona.SIGNATURE,
+    ]
+    return _truncate("\n".join(lines), max_len)
 
 
 def render_report(out: AuditOutcome, max_len: int = 3600) -> str:

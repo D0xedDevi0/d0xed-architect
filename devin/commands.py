@@ -1,7 +1,7 @@
 """Bounded command parsing.
 
 The allowed set is a single tuple so a handler cannot exist without a
-registration (see the bot dispatch-table test). Commands are /start /help
+registration (see the bot dispatch-table test). Commands are /start /help /lore
 (no arg), /audit /debug /map (one URL arg), and /doctor (no arg). Anything
 else — unknown commands, plain text, oversized messages, wrong arity — is a
 `reject` and never reaches a handler.
@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-COMMANDS = ("/start", "/help", "/audit", "/debug", "/map", "/doctor")
+COMMANDS = ("/start", "/help", "/lore", "/audit", "/debug", "/map", "/doctor")
 
-_NO_ARG = ("start", "help", "doctor")
+_NO_ARG = ("start", "help", "lore", "doctor")
 _ONE_ARG = ("audit", "debug", "map")
 
 

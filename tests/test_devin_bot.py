@@ -4,6 +4,7 @@ import unittest
 from devin.bot import DevinBot, TelegramError
 from devin.commands import COMMANDS
 from devin.config import Config, Limits
+from devin.report import PHOTO
 from tests.devin_fixtures import (BOT_ID, BOT_USERNAME, FAKE_TOKEN, GROUP_ID,
                                   USER_ID, FakeGithub, FakeTelegram,
                                   build_tarball, dm_update, group_update)
@@ -26,7 +27,10 @@ class TestBotCommands(unittest.TestCase):
         r = bot.handle_update(dm_update(1, USER_ID, "/start"))
         self.assertEqual(r.action, "replied")
         self.assertEqual(r.detail, "start")
-        self.assertIn("/audit", tg.sent[0]["text"])
+        # /start opens with Looper #706's art + the welcome caption
+        self.assertEqual(tg.photos[0]["photo"], PHOTO)
+        self.assertIn("/audit", tg.photos[0]["caption"])
+        self.assertEqual(tg.sent, [])       # no separate text message
 
     def test_help(self):
         bot, _, tg = make_bot()
@@ -67,13 +71,15 @@ class TestBotCommands(unittest.TestCase):
         expectations = {
             "/start": "start",
             "/help": "help",
+            "/lore": "lore",
             "/doctor": "doctor",
         }
         for cmd, expected in expectations.items():
             r = bot.handle_update(dm_update(1, USER_ID, cmd))
             self.assertEqual(r.detail, expected, cmd)
         self.assertEqual(COMMANDS,
-                         ("/start", "/help", "/audit", "/debug", "/map", "/doctor"))
+                         ("/start", "/help", "/lore", "/audit", "/debug",
+                          "/map", "/doctor"))
         # /audit and /debug are exercised here; /map needs an injected fetcher.
         r = bot.handle_update(dm_update(2, USER_ID, "/audit https://github.com/a/b"))
         self.assertTrue(r.detail.startswith("audit:"), r.detail)
@@ -82,6 +88,23 @@ class TestBotCommands(unittest.TestCase):
 
 
 class TestNewCommands(unittest.TestCase):
+    def test_lore_authorized(self):
+        bot, _, tg = make_bot()
+        r = bot.handle_update(dm_update(1, USER_ID, "/lore"))
+        self.assertEqual(r.detail, "lore")
+        text = tg.sent[0]["text"]
+        self.assertIn("Looper #706", text)
+        self.assertIn("87226", text)
+        self.assertIn("Wire a tool", text)
+
+    def test_start_falls_back_to_text_when_photo_rejected(self):
+        tg = FakeTelegram(photo_ok=False)
+        bot, _, tg = make_bot(tg=tg)
+        r = bot.handle_update(dm_update(1, USER_ID, "/start"))
+        self.assertEqual(r.detail, "start")
+        self.assertEqual(len(tg.photos), 1)           # photo was attempted
+        self.assertIn("/audit", tg.sent[0]["text"])   # text fallback landed
+
     def test_debug_authorized(self):
         bot, gh, tg = make_bot()
         r = bot.handle_update(dm_update(1, USER_ID,
@@ -132,7 +155,7 @@ class TestBotAccess(unittest.TestCase):
         r = bot.handle_update(dm_update(1, 999999, "/audit https://github.com/a/b"))
         self.assertEqual(r.action, "denied")
         self.assertEqual(r.detail, "sender not allowlisted")
-        self.assertEqual(tg.sent[0]["text"], "Access denied.")
+        self.assertEqual(tg.sent[0]["text"], "Not on the list.")
         self.assertEqual(gh.calls, [])   # no audit was run
 
     def test_unauthorized_group_silent(self):

@@ -119,12 +119,14 @@ class FakeTelegram:
     """Injected Telegram transport: (url, method, body, timeout) -> Response."""
 
     def __init__(self, updates=None, bot_id=BOT_ID, bot_username=BOT_USERNAME,
-                 webhook_url=""):
+                 webhook_url="", photo_ok=True):
         self.updates = updates or []
         self.bot_id = bot_id
         self.bot_username = bot_username
         self.webhook_url = webhook_url
-        self.sent: list[dict] = []   # sendMessage params captured
+        self.photo_ok = photo_ok
+        self.sent: list[dict] = []    # sendMessage params captured
+        self.photos: list[dict] = []  # sendPhoto params captured
         self.urls: list[str] = []
 
     def __call__(self, url, method, body, timeout):
@@ -136,6 +138,13 @@ class FakeTelegram:
                 {"ok": True, "result": self.updates}).encode())
         if name == "sendMessage":
             self.sent.append(params)
+            return make_response(200, json.dumps(
+                {"ok": True, "result": {"message_id": 1}}).encode())
+        if name == "sendPhoto":
+            self.photos.append(params)
+            if not self.photo_ok:
+                return make_response(400, json.dumps(
+                    {"ok": False, "description": "wrong file identifier"}).encode())
             return make_response(200, json.dumps(
                 {"ok": True, "result": {"message_id": 1}}).encode())
         if name == "getMe":
