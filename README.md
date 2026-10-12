@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/D0xedDevi0/d0xed-architect/actions"><img src="https://img.shields.io/badge/tests-306%20passed-00d4ff" alt="tests: 306 passed"></a>
+  <a href="https://github.com/D0xedDevi0/d0xed-architect/tree/main/tests"><img src="https://img.shields.io/badge/tests-306%20passed-00d4ff" alt="tests: 306 passed"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white" alt="python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3366cc" alt="license MIT"></a>
   <a href="https://t.me/DEVinlooperbot"><img src="https://img.shields.io/badge/Telegram-DEVinlooperbot-26A5E4?logo=telegram&logoColor=white" alt="Telegram DEVinlooperbot"></a>
