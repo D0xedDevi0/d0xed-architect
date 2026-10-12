@@ -9,6 +9,8 @@ from html.parser import HTMLParser
 SKIP = {"script", "style", "noscript", "svg", "template", "iframe"}
 BLOCK = {"p", "div", "section", "article", "li", "br", "tr", "h1", "h2", "h3",
          "h4", "h5", "h6", "blockquote", "pre"}
+VOID = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
+        'meta', 'param', 'source', 'track', 'wbr'}
 
 
 @dataclass
@@ -27,12 +29,14 @@ class Page:
     scripts: int = 0
     word_count: int = 0
     text: str = ""
+    text_nodes: list = field(default_factory=list)  # typed mode: visible literal data nodes
     hidden_suspicious: list = field(default_factory=list)
 
 
 class _Extractor(HTMLParser):
-    def __init__(self):
+    def __init__(self, *, typed: bool = False):
         super().__init__(convert_charrefs=True)
+        self.typed = typed
         self.p = Page()
         self._skip = 0
         self._in_title = False
@@ -46,9 +50,12 @@ class _Extractor(HTMLParser):
         self._in_jsonld = False
         self._jsonld: list[str] = []
         self._style_attr_stack: list[str] = []
+        self._hidden_tags: list[str] = []
 
     # -- helpers
     def _hidden(self, attrs: dict) -> bool:
+        if self.typed and ('hidden' in attrs or attrs.get('aria-hidden', '').lower() == 'true'):
+            return True
         style = (attrs.get("style") or "").replace(" ", "").lower()
         if not style:
             return False
@@ -60,6 +67,11 @@ class _Extractor(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         a = {k.lower(): (v or "") for k, v in attrs}
+        if self.typed and self._hidden_tags and tag in SKIP:
+            self._skip += 1
+            if tag == 'script':
+                self.p.scripts += 1
+            return
         if tag in SKIP:
             if tag == "script" and a.get("type", "").lower() == "application/ld+json":
                 self._in_jsonld = True
@@ -69,6 +81,15 @@ class _Extractor(HTMLParser):
                 self.p.scripts += 1
             return
         if self._skip:
+            return
+        if self.typed and self._hidden(a):
+            self.p.hidden_suspicious.append(f"<{tag}> {a.get('class') or a.get('id') or ''}")
+            if tag not in VOID:
+                self._hidden_tags.append(tag)
+            return
+        if self.typed and self._hidden_tags:
+            if tag not in VOID:
+                self._hidden_tags.append(tag)
             return
         if tag == "title":
             self._in_title = True
@@ -91,9 +112,9 @@ class _Extractor(HTMLParser):
             self._code = []
         elif tag == "form":
             self.p.forms += 1
-        if self._hidden(a):
+        if not self.typed and self._hidden(a):
             self.p.hidden_suspicious.append(f"<{tag}> {a.get('class') or a.get('id') or ''}")
-        if tag in BLOCK:
+        if tag in BLOCK or (self.typed and tag in {'title','head','body'}):
             self._text.append("\n")
 
     def handle_endtag(self, tag):
@@ -112,6 +133,10 @@ class _Extractor(HTMLParser):
             return
         if self._skip:
             return
+        if self.typed and self._hidden_tags:
+            if tag == self._hidden_tags[-1]:
+                self._hidden_tags.pop()
+            return
         if tag == "title":
             self._in_title = False
             self.p.title = " ".join("".join(self._buf).split())
@@ -129,14 +154,14 @@ class _Extractor(HTMLParser):
             if len(blob) > 24:
                 self.p.code_blocks.append(blob[:4000])
             self._in_code = False
-        if tag in BLOCK:
+        if tag in BLOCK or (self.typed and tag in {'title','head','body'}):
             self._text.append("\n")
 
     def handle_data(self, data):
         if self._in_jsonld:
             self._jsonld.append(data)
             return
-        if self._skip:
+        if self._skip or (self.typed and self._hidden_tags):
             return
         self._buf.append(data)
         if self._in_code:
@@ -144,6 +169,8 @@ class _Extractor(HTMLParser):
         if self._link_href is not None:
             self._link_text.append(data)
         self._text.append(data)
+        if self.typed and data.strip():
+            self.p.text_nodes.append(data)
 
     def finish(self, url: str) -> Page:
         self.p.url = url
@@ -156,8 +183,8 @@ class _Extractor(HTMLParser):
         return self.p
 
 
-def extract(html: str, url: str) -> Page:
-    p = _Extractor()
+def extract(html: str, url: str, *, typed: bool = False) -> Page:
+    p = _Extractor(typed=typed)
     try:
         p.feed(html)
     except Exception:

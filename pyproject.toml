@@ -3,7 +3,12 @@ name = "d0xed-architect"
 version = "0.1.0"
 description = "D0xed Architect — an identity-declared, x402-paying agentic crawler + code auditor."
 requires-python = ">=3.11"
-dependencies = ["cryptography>=42"]
+dependencies = ["cryptography>=42", "eth-account>=0.14"]
+
+[project.optional-dependencies]
+browser = ["playwright>=1.63,<2"]
+mcp = ["mcp>=2.3,<3"]
+all = ["playwright>=1.63,<2", "mcp>=2.3,<3"]
 
 [project.scripts]
 architect = "architect.cli:main"

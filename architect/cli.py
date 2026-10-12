@@ -22,12 +22,14 @@ import urllib.parse
 from . import audit as _audit
 from . import auth as _auth
 from . import crypto as _crypto
+from . import escalate as _esc
 from . import extract as _extract
 from . import http as _http
 from . import report as _report
 from . import swarm as _swarm
 from . import trust as _trust
 from . import x402 as _x402
+from .crawl_access import CrawlAccess
 from .graph import Graph
 
 # Receipts for paywalls settled during this process run.
@@ -41,7 +43,9 @@ def cmd_crawl(args) -> int:
     start = args.url if "://" in args.url else "https://" + args.url
     origin = "{0.scheme}://{0.netloc}".format(urllib.parse.urlsplit(start))
 
-    robots = _http.load_robots(origin, agent_id=args.signature_agent)
+    robots = _http.load_robots(origin, agent_id=args.signature_agent,
+                               strict=True)
+    access = CrawlAccess(origin, robots)
     llms = _http.load_llms_txt(origin, agent_id=args.signature_agent)
 
     print(f"[architect] robots.txt={'found' if robots.found else 'absent'} "
@@ -60,6 +64,14 @@ def cmd_crawl(args) -> int:
         args._policy = None
         args._account = None
 
+    # Opt-in JS-shell escalation: stay HTTP-first, render only pages that
+    # classify as shells, capped so one crawl can't melt the box.
+    args._budget = (_esc.EscalationBudget(max_renders=max(1, args.max_renders))
+                    if getattr(args, "render", False) else None)
+    if args._budget is not None:
+        print(f"[architect] 🖥️  render ladder armed: ≤{args.max_renders} "
+              f"browser renders", file=sys.stderr)
+
     queue = [start]
     if llms.found:
         for links in llms.sections.values():
@@ -71,12 +83,19 @@ def cmd_crawl(args) -> int:
     graph = Graph(args.graph or ":memory:")
 
     for _depth in range(args.depth + 1):
-        frontier = [u for u in queue if u not in seen][:args.max_pages * 4]
+        candidates = [u for u in queue if u not in seen][:args.max_pages * 4]
+        frontier = []
+        for u in candidates:
+            if not access.allows(u):
+                seen.add(u)
+                print(f"[architect] access denied {u}", file=sys.stderr)
+                continue
+            frontier.append(u)
         if not frontier:
             break
         next_queue = []
         with cf.ThreadPoolExecutor(max_workers=args.concurrency) as ex:
-            futs = {ex.submit(_fetch_one, u, args): u for u in frontier}
+            futs = {ex.submit(_fetch_one, u, args, access): u for u in frontier}
             for fut in cf.as_completed(futs):
                 url = futs[fut]
                 if url in seen:
@@ -121,6 +140,11 @@ def cmd_crawl(args) -> int:
         print(f"[architect] 💳 settled {len(_PAID)} paywall(s), {spent:.6f} USDC "
               f"authorized (not broadcast)", file=sys.stderr)
 
+    if getattr(args, "_budget", None) is not None:
+        print(f"[architect] 🖥️  rendered {args._budget.used} page(s), "
+              f"skipped {args._budget.skipped} (budget exhausted)",
+              file=sys.stderr)
+
     graph.commit()
     stats = graph.stats()
     md = _report.crawl_report(start, robots, llms, pages, trusts, stats,
@@ -129,7 +153,7 @@ def cmd_crawl(args) -> int:
     return 0
 
 
-def _fetch_one(url: str, args):
+def _fetch_one(url: str, args, access: CrawlAccess | None = None):
     """Fetch one URL, settling a 402 when payment is armed and affordable."""
     policy = getattr(args, "_policy", None)
     if policy is not None and policy.enabled:
@@ -137,7 +161,8 @@ def _fetch_one(url: str, args):
             r = _x402.fetch_paid(
                 url, policy, account=getattr(args, "_account", None),
                 timeout=args.timeout,
-                headers=_http._identity_headers(args.signature_agent))
+                headers=_http._identity_headers(args.signature_agent),
+                redirect_guard=access.require if access is not None else None)
         except _x402.PaymentRequired as e:
             # Refusal is data, not a crash: record the gate and its reason.
             return 402, str(e)
@@ -150,11 +175,28 @@ def _fetch_one(url: str, args):
         return r["status"], None
 
     r = _http.fetch(url, timeout=args.timeout, agent_id=args.signature_agent,
-                    allow_402=False)
+                    allow_402=False,
+                    redirect_guard=access.require if access is not None else None)
     if r.status == 402:
         return 402, r.headers.get("x-price") or r.headers.get("price")
     if "html" not in (r.content_type or "") and "text" not in (r.content_type or ""):
         return 204, None
+
+    # JS-shell escalation (opt-in): classify the already-fetched body and
+    # render under the budget, reusing the access guard so JS navigation
+    # cannot reach a denied destination.
+    budget = getattr(args, "_budget", None)
+    if budget is not None:
+        verdict = _esc.looks_js_dependent(r)
+        if verdict.needs_render and budget.spend():
+            try:
+                rr = _esc.render(
+                    url, timeout=args.timeout,
+                    request_guard=access.require if access is not None else None)
+                rr.escalation_reason = "; ".join(verdict.reasons)
+                return 200, rr.text
+            except _esc.RenderError:
+                pass  # fall back to the HTTP body on any render failure
     return 200, r.text
 
 
@@ -549,6 +591,10 @@ def main(argv=None) -> int:
     c.add_argument("--concurrency", type=int, default=6)
     c.add_argument("--timeout", type=int, default=20)
     c.add_argument("--signature-agent", help="Web Bot Auth key-directory URL")
+    c.add_argument("--render", action="store_true",
+                   help="escalate JS shells to a real browser (HTTP-first ladder)")
+    c.add_argument("--max-renders", type=int, default=25,
+                   help="cap on browser renders per crawl (default 25)")
     payable(c)
     common(c)
     c.set_defaults(fn=cmd_crawl)

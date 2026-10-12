@@ -34,6 +34,8 @@ async def run(url, max_pages, depth):
     edges = 0
     skipped = 0
     md_chars = 0
+    marker = os.environ.get("BENCH_CONTENT_MARKER") or None
+    marker_pages = 0
 
     queue = [url]
     # crawl4ai resolves the browser through Playwright; BrowserConfig has no
@@ -71,6 +73,8 @@ async def run(url, max_pages, depth):
                 if not isinstance(md, str):
                     md = getattr(md, "raw_markdown", "") or str(md)
                 md_chars += len(md)
+                if marker and marker in md:
+                    marker_pages += 1
 
                 pages.append(u)
                 links = (getattr(r, "links", {}) or {}).get("internal", []) or []
@@ -95,6 +99,7 @@ async def run(url, max_pages, depth):
         "graph_nodes": 0,
         "skipped": skipped,
         "markdown_chars": md_chars,
+        "content_marker_pages": marker_pages if marker else None,
         "robots_found": None,   # crawl4ai does not fetch robots.txt by default
         "llms_found": None,
         "peak_rss_mb": round(

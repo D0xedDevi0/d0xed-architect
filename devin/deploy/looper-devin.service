@@ -1,0 +1,47 @@
+[Unit]
+Description=DEVin Looper Telegram bot (read-only public-repo auditor, Looper #706 / ERC-8004 agent 87226)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=looper-devin
+Group=looper-devin
+WorkingDirectory=/srv/looper-agents/devin/app
+ExecStart=/srv/looper-agents/devin/venv/bin/python -u -m devin
+# Fail-closed allowlist: only the owner's DM and the shared Loopers group.
+Environment=DEVIN_ALLOWED_USERS=7898354400
+Environment=DEVIN_ALLOWED_GROUPS=-1004351143165
+# Pin the expected bot identity; startup refuses any other token.
+Environment=DEVIN_BOT_ID=8803435794
+Environment=DEVIN_BOT_USERNAME=DEVinlooperbot
+# Token comes from an encrypted systemd credential, NOT the environment.
+LoadCredentialEncrypted=telegram_token:/etc/credstore.encrypted/looper-devin.token
+# Optional: enables /audit + /debug on PRIVATE repos. Uncomment (and chmod 600
+# the encrypted file) only once a GitHub PAT has been provisioned.
+#LoadCredentialEncrypted=github_token:/etc/credstore.encrypted/looper-devin.github
+# Optional: the SEALING KEY for /bundle and for sealing an uploaded code set.
+# Uncomment only once provisioned — a missing credential file stops the unit
+# from starting (systemd fails closed on LoadCredentialEncrypted), and without
+# it sealing refuses rather than using a guessable default.
+#LoadCredentialEncrypted=bundle_passphrase:/etc/credstore.encrypted/looper-devin.bundle
+Restart=always
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/srv/looper-agents/devin/state
+MemoryMax=384M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

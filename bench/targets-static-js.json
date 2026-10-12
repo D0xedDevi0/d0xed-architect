@@ -1,0 +1,14 @@
+[
+  {
+    "name": "example-static",
+    "url": "https://example.com/",
+    "kind": "static",
+    "content_marker": "Example Domain"
+  },
+  {
+    "name": "quotes-js",
+    "url": "https://quotes.toscrape.com/js/",
+    "kind": "js",
+    "content_marker": "Albert Einstein"
+  }
+]

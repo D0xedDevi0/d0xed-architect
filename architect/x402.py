@@ -81,11 +81,24 @@ def b64d(text: str) -> bytes:
 
 # ── transport ──────────────────────────────────────────────────────────────
 
-def _request(method: str, url: str, headers: dict, timeout: int):
+def _request(method: str, url: str, headers: dict, timeout: int,
+             redirect_guard=None):
     """Return (status, lowercased_headers, body). 4xx/5xx do not raise."""
+    if redirect_guard is not None:
+        redirect_guard(url)
     req = urllib.request.Request(url, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        if redirect_guard is None:
+            response = urllib.request.urlopen(req, timeout=timeout)
+        else:
+            class GuardedRedirect(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, req, fp, code, msg, headers, newurl):
+                    redirect_guard(newurl)
+                    return super().redirect_request(req, fp, code, msg,
+                                                    headers, newurl)
+            opener = urllib.request.build_opener(GuardedRedirect())
+            response = opener.open(req, timeout=timeout)
+        with response as r:
             return r.status, {k.lower(): v for k, v in r.headers.items()}, r.read()
     except urllib.error.HTTPError as e:
         body = b""
@@ -295,7 +308,7 @@ def load_account(key_path: str | None = None, private_key: str | None = None):
 
 def fetch_paid(url: str, policy: PayPolicy, account=None, *,
                method: str = "GET", timeout: int = 30,
-               headers: dict | None = None) -> dict:
+               headers: dict | None = None, redirect_guard=None) -> dict:
     """GET a URL, settling a 402 if the policy allows it.
 
     Returns a dict: status, paid, amount_usdc, receipt, content, headers.
@@ -303,7 +316,8 @@ def fetch_paid(url: str, policy: PayPolicy, account=None, *,
     """
     base_headers = dict(headers or {})
 
-    status, resp_headers, content = _request(method, url, base_headers, timeout)
+    status, resp_headers, content = _request(
+        method, url, base_headers, timeout, redirect_guard=redirect_guard)
 
     if status != 402:
         return {"status": status, "paid": False, "amount_usdc": 0.0,
@@ -326,7 +340,8 @@ def fetch_paid(url: str, policy: PayPolicy, account=None, *,
     retry_headers = {**base_headers, **payment_header(payload)}
     retry_headers.setdefault("Accept", "application/json")
 
-    status2, headers2, content2 = _request(method, url, retry_headers, timeout)
+    status2, headers2, content2 = _request(
+        method, url, retry_headers, timeout, redirect_guard=redirect_guard)
 
     if status2 in (200, 201, 202):
         policy.record(url, requirement, price)

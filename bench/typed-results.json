@@ -1,0 +1,222 @@
+{
+  "deterministic": {
+    "mode": "deterministic",
+    "fixtures": 9,
+    "precision": 1.0,
+    "recall": 0.875,
+    "abstention_accuracy": 1.0,
+    "true_positives": 7,
+    "false_positives": 0,
+    "false_negatives": 1,
+    "wrong_abstentions": 0,
+    "model_calls": 0,
+    "tokens_in": null,
+    "tokens_out": null,
+    "cost_usd": null,
+    "cost_source": "unknown",
+    "wall_seconds": 0.002,
+    "per_fixture": [
+      {
+        "name": "static_clean",
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 0,
+        "wrong_abstain": 0,
+        "model_calls": 0,
+        "model_error": null
+      },
+      {
+        "name": "conflicting_jsonld",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 1,
+        "wrong_abstain": 0,
+        "model_calls": 0,
+        "model_error": null
+      },
+      {
+        "name": "missing_field",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 1,
+        "wrong_abstain": 0,
+        "model_calls": 0,
+        "model_error": null
+      },
+      {
+        "name": "injection_only",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 1,
+        "wrong_abstain": 0,
+        "model_calls": 0,
+        "model_error": null
+      },
+      {
+        "name": "spa_shell",
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 1,
+        "wrong_abstain": 0,
+        "model_calls": 0,
+        "model_error": null
+      },
+      {
+        "name": "model_author",
+        "tp": 0,
+        "fp": 0,
+        "fn": 1,
+        "correct_abstain": 0,
+        "wrong_abstain": 0,
+        "model_calls": 0,
+        "model_error": null
+      },
+      {
+        "name": "robots_denied",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 1,
+        "wrong_abstain": 0,
+        "model_calls": 0,
+        "model_error": "robots disallows page"
+      },
+      {
+        "name": "ai_input_no",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 1,
+        "wrong_abstain": 0,
+        "model_calls": 0,
+        "model_error": null
+      },
+      {
+        "name": "mixed",
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 1,
+        "wrong_abstain": 0,
+        "model_calls": 0,
+        "model_error": null
+      }
+    ],
+    "note": "small handcrafted fixture evaluation, not production accuracy; costs are provider-reported, not pre-call guarantees"
+  },
+  "llm": {
+    "mode": "llm",
+    "fixtures": 9,
+    "precision": 1.0,
+    "recall": 1.0,
+    "abstention_accuracy": 1.0,
+    "true_positives": 8,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "wrong_abstentions": 0,
+    "model_calls": 3,
+    "tokens_in": 397,
+    "tokens_out": 34,
+    "cost_usd": 0.0001599,
+    "cost_source": "provider_reported",
+    "wall_seconds": 5.457,
+    "per_fixture": [
+      {
+        "name": "static_clean",
+        "tp": 4,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 0,
+        "wrong_abstain": 0,
+        "model_calls": 0,
+        "model_error": null
+      },
+      {
+        "name": "conflicting_jsonld",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 1,
+        "wrong_abstain": 0,
+        "model_calls": 0,
+        "model_error": null
+      },
+      {
+        "name": "missing_field",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 1,
+        "wrong_abstain": 0,
+        "model_calls": 1,
+        "model_error": null
+      },
+      {
+        "name": "injection_only",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 1,
+        "wrong_abstain": 0,
+        "model_calls": 1,
+        "model_error": null
+      },
+      {
+        "name": "spa_shell",
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 1,
+        "wrong_abstain": 0,
+        "model_calls": 0,
+        "model_error": null
+      },
+      {
+        "name": "model_author",
+        "tp": 1,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 0,
+        "wrong_abstain": 0,
+        "model_calls": 1,
+        "model_error": null
+      },
+      {
+        "name": "robots_denied",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 1,
+        "wrong_abstain": 0,
+        "model_calls": 0,
+        "model_error": "robots disallows page"
+      },
+      {
+        "name": "ai_input_no",
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 1,
+        "wrong_abstain": 0,
+        "model_calls": 0,
+        "model_error": "site Content-Signal ai-input=no forbids model input"
+      },
+      {
+        "name": "mixed",
+        "tp": 2,
+        "fp": 0,
+        "fn": 0,
+        "correct_abstain": 1,
+        "wrong_abstain": 0,
+        "model_calls": 0,
+        "model_error": null
+      }
+    ],
+    "note": "small handcrafted fixture evaluation, not production accuracy; costs are provider-reported, not pre-call guarantees"
+  }
+}

@@ -24,6 +24,7 @@ from architect import extract as _extract   # noqa: E402
 from architect import escalate as _esc      # noqa: E402
 from architect import http as _http         # noqa: E402
 from architect.cache import HttpCache       # noqa: E402
+from architect.crawl_access import CrawlAccess  # noqa: E402
 from architect.graph import Graph           # noqa: E402
 
 LADDER = (os.environ.get("ARCH_MODE") or "").lower() == "ladder"
@@ -52,7 +53,8 @@ def run(url, max_pages, depth):
     u0 = urllib.parse.urlsplit(url)
     origin = f"{u0.scheme}://{u0.netloc}"
     same = _host(url)
-    robots = _http.load_robots(origin)
+    robots = _http.load_robots(origin, strict=True)
+    access = CrawlAccess(origin, robots)
     llms = _http.load_llms_txt(origin)
 
     t0 = time.time()
@@ -64,6 +66,8 @@ def run(url, max_pages, depth):
     escalations = 0
     cached_pages = 0
     md_chars = 0
+    marker = os.environ.get("BENCH_CONTENT_MARKER") or None
+    marker_pages = 0
 
     queue = [url]
     for links in (getattr(llms, "sections", {}) or {}).values():
@@ -74,14 +78,22 @@ def run(url, max_pages, depth):
     graph = Graph(":memory:")
 
     for _ in range(depth + 1):
-        frontier = [u for u in queue if u not in seen][: max_pages * 4]
+        candidates = [u for u in queue if u not in seen][: max_pages * 4]
+        frontier = []
+        for u in candidates:
+            if not access.allows(u):
+                seen.add(u)
+                skipped += 1
+                continue
+            frontier.append(u)
         if not frontier or len(pages) >= max_pages:
             break
         nxt = []
 
         fetched = []
         with cf.ThreadPoolExecutor(max_workers=6) as ex:
-            futs = {ex.submit(_http.fetch, u, 15, None, True, CACHE): u
+            futs = {ex.submit(_http.fetch, u, 15, None, True, CACHE,
+                              redirect_guard=access.require): u
                     for u in frontier}
             for fut in cf.as_completed(futs):
                 try:
@@ -102,7 +114,7 @@ def run(url, max_pages, depth):
                 if not BUDGET.spend():
                     continue
                 try:
-                    rr = _esc.render(u, timeout=25)
+                    rr = _esc.render(u, timeout=25, request_guard=access.require)
                 except Exception:
                     continue
                 rr.escalation_reason = ",".join(verdict.reasons)
@@ -128,7 +140,10 @@ def run(url, max_pages, depth):
                 cached_pages += 1
             p = _extract.extract(getattr(r, "text", "") or "", u)
             pages.append(u)
-            md_chars += len(_extract.to_markdown(p))
+            markdown = _extract.to_markdown(p)
+            md_chars += len(markdown)
+            if marker and marker in markdown:
+                marker_pages += 1
             graph.node("page", u, label=p.title or u)
             for href, _t in p.links:
                 tgt = urllib.parse.urljoin(u, href).split("#")[0]
@@ -150,6 +165,7 @@ def run(url, max_pages, depth):
         "graph_nodes": st.get("nodes", 0),
         "skipped": skipped,
         "markdown_chars": md_chars,
+        "content_marker_pages": marker_pages if marker else None,
         "robots_found": bool(robots.found),
         "llms_found": bool(llms.found),
         "escalations": escalations,

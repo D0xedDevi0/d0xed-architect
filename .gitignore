@@ -5,3 +5,6 @@ demo/crawl_frames/
 demo/*-events.jsonl
 demo/spider_frames/
 bench/.venv/
+build/
+dist/
+*.egg-info/

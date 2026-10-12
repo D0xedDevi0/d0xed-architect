@@ -143,7 +143,8 @@ def render(url: str, timeout: int = DEFAULT_TIMEOUT,
            wait_until: str = "domcontentloaded",
            settle_ms: int = 350,
            user_agent: str = UA,
-           max_bytes: int = 4_000_000) -> Response:
+           max_bytes: int = 4_000_000,
+           request_guard=None) -> Response:
     """Fetch `url` through a real browser and return the post-JS DOM.
 
     Returns a normal Response (so callers need no special case), with
@@ -159,8 +160,45 @@ def render(url: str, timeout: int = DEFAULT_TIMEOUT,
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             try:
-                ctx = browser.new_context(user_agent=user_agent)
+                context_options = {"user_agent": user_agent}
+                if request_guard is not None:
+                    context_options["service_workers"] = "block"
+                ctx = browser.new_context(**context_options)
                 page = ctx.new_page()
+                if request_guard is not None:
+                    request_guard(url)
+                    # Playwright route() does NOT intercept HTTP redirect hops.
+                    # CDP Fetch.requestPaused does: enforce policy before each
+                    # navigation, redirect, and browser subrequest.
+                    session = ctx.new_cdp_session(page)
+                    def gate(event):
+                        request_id = event["requestId"]
+                        try:
+                            request_guard(event["request"]["url"])
+                        except Exception:
+                            session.send("Fetch.failRequest", {
+                                "requestId": request_id,
+                                "errorReason": "BlockedByClient"})
+                            return
+                        session.send("Fetch.continueRequest", {
+                            "requestId": request_id})
+                    session.on("Fetch.requestPaused", gate)
+                    session.send("Fetch.enable", {"patterns": [
+                        {"urlPattern": "*", "requestStage": "Request"}]})
+                    # A popup's first request may occur before a page-level
+                    # CDP session exists. Never allow secondary pages in a
+                    # single-page render; context routing catches that start.
+                    def block_popups(route):
+                        try:
+                            owner = route.request.frame.page
+                        except Exception:
+                            route.abort("blockedbyclient")
+                            return
+                        if owner != page:
+                            route.abort("blockedbyclient")
+                        else:
+                            route.continue_()
+                    ctx.route("**/*", block_popups)
                 resp = page.goto(url, timeout=timeout * 1000,
                                  wait_until=wait_until)
                 if settle_ms:
@@ -212,23 +250,30 @@ def fetch_smart(url: str, *, timeout: int = DEFAULT_TIMEOUT,
                 allow_render: bool = True,
                 force_render: bool = False,
                 budget: EscalationBudget | None = None,
-                wait_until: str = "domcontentloaded") -> tuple[Response, Verdict]:
+                wait_until: str = "domcontentloaded",
+                redirect_guard=None, request_guard=None) -> tuple[Response, Verdict]:
     """HTTP-first, escalating to a browser only when the page needs it.
 
     Returns (response, verdict) so callers get the real content *and* the
     reason it took the path it did — which is what makes crawl reports
     honest about how many pages actually needed rendering.
+
+    `redirect_guard` is enforced on the initial HTTP fetch and every redirect
+    hop; `request_guard` is enforced on the browser render and every browser
+    subrequest/redirect, so policy can't be bypassed by JS navigation.
     """
     from .http import fetch
 
-    resp = fetch(url, timeout=timeout, agent_id=agent_id)
+    resp = fetch(url, timeout=timeout, agent_id=agent_id,
+                 redirect_guard=redirect_guard)
 
     if force_render:
         if budget is not None and not budget.spend():
             return resp, Verdict(False, 0.0, ["budget-exhausted"],
                                  len(visible_text(resp.text or "")),
                                  len(resp.body or b""))
-        return render(url, timeout=timeout, wait_until=wait_until), \
+        return render(url, timeout=timeout, wait_until=wait_until,
+                      request_guard=request_guard), \
             Verdict(True, 99.0, ["forced"], 0, 0)
 
     verdict = looks_js_dependent(resp)
@@ -239,5 +284,6 @@ def fetch_smart(url: str, *, timeout: int = DEFAULT_TIMEOUT,
         verdict.reasons.append("budget-exhausted")
         return resp, verdict
 
-    rendered = render(url, timeout=timeout, wait_until=wait_until)
+    rendered = render(url, timeout=timeout, wait_until=wait_until,
+                      request_guard=request_guard)
     return rendered, verdict
