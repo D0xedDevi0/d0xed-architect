@@ -40,14 +40,22 @@ def _ssl_ctx() -> ssl.SSLContext:
 
 
 def telegram_call(url: str, method: str, body: bytes | None,
-                  timeout: float) -> Response:
-    """POST to the Telegram API; refuses any host other than api.telegram.org."""
+                  timeout: float,
+                  content_type: str = "application/json") -> Response:
+    """POST to the Telegram API; refuses any host other than api.telegram.org.
+
+    `content_type` defaults to JSON so every existing caller is unchanged; the
+    multipart form is needed only to send a document (sendDocument).
+    """
     p = urllib.parse.urlsplit(url)
     if p.scheme != "https" or (p.hostname or "").lower() != TELEGRAM_HOST:
         raise TransportError("telegram host not allowlisted")
+    if not content_type.startswith(("application/json",
+                                    "multipart/form-data; boundary=")):
+        raise TransportError("refusing unknown content type")
     data = body if body is not None else None
     req = urllib.request.Request(url, data=data, method=method,
-                                 headers={"Content-Type": "application/json"})
+                                 headers={"Content-Type": content_type})
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx()) as r:
             raw = r.read(TELEGRAM_BODY_CAP + 1)

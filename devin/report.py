@@ -44,6 +44,7 @@ COMMANDS = [
     {"command": "crawl", "description": "Crawl a public site: pages, links, assets"},
     {"command": "sitemap", "description": "Read a site's sitemap.xml inventory"},
     {"command": "link", "description": "Shareable links to add DEVin anywhere"},
+    {"command": "bundle", "description": "Seal a public repo into one encrypted file"},
     {"command": "doctor", "description": "Self-diagnostics"},
 ]
 
@@ -56,6 +57,7 @@ DEEPLINK_PAYLOADS = {
     "map": "/map <url> — I map one page of a public site, robots first.",
     "crawl": "/crawl <url> [depth 1-4] — I walk it: pages, link graph, assets.",
     "sitemap": "/sitemap <url> — I read its sitemap.xml inventory.",
+    "bundle": "/bundle <github-url> — I seal the repo into one encrypted file.",
     "lore": "/lore — who I am, straight off the chain.",
     "group": "Add me to a room and address me: /help@<my-username>",
     "help": "/help — everything I can do.",
@@ -70,6 +72,7 @@ START_TEXT = (
     "/map <url> — map one page of a public site, robots first.\n"
     "/crawl <url> [depth] — walk the site: pages, link graph, assets.\n"
     "/sitemap <url> — read its sitemap.xml inventory.\n"
+    "/bundle <github-url> — seal a repo into one encrypted file (DM only).\n"
     "/link — shareable links to put me in a DM or a group.\n"
     "/lore — who I am.   /doctor — self-check.   /help — the rest.\n\n"
     "Static only. I don't run your code, I don't spend, I don't touch wallets.\n"
@@ -90,6 +93,12 @@ HELP_TEXT = (
     "                   n = depth 1-4 (default 2). Pages, link graph,\n"
     "                   assets, external hosts, per-page sha256 receipts.\n"
     "/sitemap <url>   — sitemap.xml + sitemapindex inventory (robots hints first)\n"
+    "/bundle <url>    — /bundle https://github.com/<owner>/<repo>\n"
+    "                   seals the repo into ONE encrypted file:\n"
+    "                   .tar.gz.enc (chacha20-poly1305 + scrypt, RFC 8439)\n"
+    "                   with a per-file sha256 manifest + the audit inside.\n"
+    "                   DM only — code is never posted into a group.\n"
+    "                   Refuses if live credentials are found.\n"
     "/link            — deep links to put me in a DM, a group, or a README\n"
     "/lore            — who I am (on-chain identity)\n"
     "/doctor          — self-diagnostics\n\n"

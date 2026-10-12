@@ -328,6 +328,56 @@ def inspect_tarball(data: bytes, owner: str, repo: str, ref: str,
 
 # ── orchestration ──────────────────────────────────────────────────────────
 
+def resolve_default_branch(ref: RepoRef, fetch, timeout: float,
+                           token: str | None = None) -> str:
+    """Resolve + VALIDATE the default branch for a repo.
+
+    The branch name becomes part of a codeload URL, so it is validated against
+    `_BRANCH_RE` and rejected outright if it contains `..`. Shared by /audit and
+    /bundle so neither path can drift into fetching something unexpected.
+    """
+    meta_url = f"https://api.github.com/repos/{ref.owner}/{ref.repo}"
+    meta = fetch(meta_url, timeout, _auth_headers(meta_url, token))
+    if meta.status == 404:
+        raise AuditDenied("repository not found or not public")
+    if meta.status == 403:
+        raise AuditDenied("repository not accessible (private or rate-limited)")
+    if meta.status != 200:
+        raise AuditDenied(f"repository metadata unavailable (HTTP {meta.status})")
+    try:
+        info = json.loads(meta.body.decode("utf-8"))
+    except Exception:
+        raise AuditDenied("invalid metadata response") from None
+    branch = info.get("default_branch")
+    if (not isinstance(branch, str) or not branch or ".." in branch
+            or not _BRANCH_RE.match(branch)):
+        raise AuditDenied("could not determine a safe default branch")
+    return branch
+
+
+def fetch_public_tarball(url: str, fetch, timeout: float = 60.0,
+                         token: str | None = None,
+                         max_bytes: int = 16_000_000) -> tuple[bytes, str]:
+    """(tarball_bytes, ref) for a PUBLIC GitHub repo URL, or AuditDenied.
+
+    Refuses before downloading when the size is over `max_bytes`. The archive
+    is fetched from codeload.github.com only, with the branch validated first.
+    """
+    ref = parse_repo_url(url)
+    branch = resolve_default_branch(ref, fetch, timeout, token)
+    tar_url = (f"https://codeload.github.com/{ref.owner}/{ref.repo}/"
+               f"tar.gz/refs/heads/{branch}")
+    resp = fetch(tar_url, timeout, _auth_headers(tar_url, token))
+    if resp.status != 200:
+        raise AuditDenied(f"repository archive unavailable (HTTP {resp.status})")
+    body = resp.body or b""
+    if len(body) > max_bytes:
+        raise AuditDenied("repository archive too large")
+    if not body:
+        raise AuditDenied("empty repository archive")
+    return body, f"{ref.owner}/{ref.repo}@{branch}"
+
+
 def audit_public_repo(url: str, fetch, limits: AuditLimits | None = None,
                       timeout: float = 60.0, token: str | None = None) -> AuditOutcome:
     """Fetch (metadata + tarball) and statically inspect a GitHub repo.

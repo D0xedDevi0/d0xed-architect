@@ -17,8 +17,12 @@ def main() -> int:
         raise SystemExit(f"config error: {e}") from e
     from . import transport
     from .bot import DevinBot
+    from .config import resolve_bundle_passphrase
+    # None when unprovisioned, which makes /bundle refuse instead of sealing
+    # under a default. Never printed, never logged.
     bot = DevinBot(config, transport.telegram_call, transport.github_fetch,
-                   transport.public_fetch)
+                   transport.public_fetch,
+                   bundle_passphrase=resolve_bundle_passphrase())
     bot.run()
     return 0
 

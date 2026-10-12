@@ -20,6 +20,8 @@ from .doctor import render_doctor
 from .github_audit import AuditDenied, AuditLimits, audit_public_repo
 from .crawl2 import (CrawlDenied, CrawlLimits, crawl_site, render_crawl,
                      render_sitemap, sitemap_inventory)
+from .pack import (PackError, PackLimits, PackRefused, pack_github,
+                   render_pack)
 from .report import (PHOTO, render_deep_report, render_help, render_link,
                      render_lore, render_report, render_site_map, render_start)
 
@@ -40,13 +42,17 @@ class HandledResult:
 
 
 class DevinBot:
-    def __init__(self, config: Config, transport, github_fetch, public_fetch=None):
+    def __init__(self, config: Config, transport, github_fetch, public_fetch=None,
+                 bundle_passphrase: str | None = None):
         self.config = config
         self.authorizer = Authorizer(config.allowed_user_ids,
                                      config.allowed_group_ids)
         self.transport = transport      # (url, method, body, timeout) -> Response
         self.github_fetch = github_fetch  # (url, timeout, headers=None) -> Response
         self.public_fetch = public_fetch  # (url, timeout) -> Response (site map)
+        # Held only in memory, never logged, never in a repr. None disables
+        # /bundle outright (fail-closed: no key, no sealed artifact).
+        self.bundle_passphrase = bundle_passphrase
         self._backoff = 0.0
         # Live identity, adopted from getMe at startup; seeded from config so
         # group addressing can be unit-tested without a network round trip.
@@ -226,6 +232,8 @@ class DevinBot:
             return self._handle_sitemap(uid, cmd, decision)
         if cmd.kind == "link":
             return self._handle_link(uid, cmd, decision)
+        if cmd.kind == "bundle":
+            return self._handle_bundle(uid, cmd, decision)
         if cmd.kind == "doctor":
             return self._handle_doctor(uid, cmd, decision)
         # reject
@@ -336,6 +344,101 @@ class DevinBot:
         self._reply(decision.chat_id, render_link(username),
                     reply_to=decision.message_id, thread_id=decision.thread_id)
         return HandledResult(uid, "replied", "link")
+
+    def _pack_limits(self) -> PackLimits:
+        L = self.config.limits
+        return PackLimits(max_files=max(50, L.max_repo_files * 4),
+                          max_file_bytes=L.max_file_bytes,
+                          max_total_bytes=L.max_total_bytes,
+                          max_bundle_bytes=20_000_000)
+
+    def _send_document(self, chat_id, filename, blob, caption=None, *,
+                       thread_id=None, boundary="----devinbundle"):
+        """Send one file as multipart/form-data (sendDocument).
+
+        The transport must opt into multipart: a plain 4-argument transport
+        raises TypeError and we fail CLOSED and loudly, rather than pretending
+        the artifact shipped.
+        """
+        safe_name = "".join(c for c in (filename or "bundle.enc")
+                            if c.isalnum() or c in "._-")[:64] or "bundle.enc"
+        body_parts = []
+
+        def field(name, value):
+            body_parts.append(
+                (f"--{boundary}\r\nContent-Disposition: form-data; "
+                 f'name="{name}"\r\n\r\n{value}\r\n').encode("utf-8"))
+
+        field("chat_id", str(chat_id))
+        if caption:
+            field("caption", caption[:1024])      # telegram caption cap
+        if thread_id is not None:
+            field("message_thread_id", str(thread_id))
+        body_parts.append(
+            (f"--{boundary}\r\nContent-Disposition: form-data; "
+             f'name="document"; filename="{safe_name}"\r\n'
+             "Content-Type: application/octet-stream\r\n\r\n").encode("utf-8"))
+        body_parts.append(blob)
+        body_parts.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+        body = b"".join(body_parts)
+        ctype = f"multipart/form-data; boundary={boundary}"
+        try:
+            resp = self.transport(self._url("sendDocument"), "POST", body,
+                                  self.config.limits.http_timeout, ctype)
+        except TypeError:
+            raise TelegramError("document transport cannot carry multipart")
+        if resp.status != 200:
+            raise TelegramError(f"sendDocument failed: {resp.status}")
+        return resp
+
+    def _handle_bundle(self, uid, cmd: Command, decision: AccessDecision) -> HandledResult:
+        """Seal a public repo into ONE encrypted file — DM only.
+
+        Three deliberate refusals live here: no groups (the sealed file is
+        somebody's source code), no passphrase means no bundle (rather than
+        sealing under a guessable default), and live credentials block the
+        seal unless explicitly acknowledged.
+        """
+        if (decision.chat_type or "").lower() != "private":
+            self._reply(decision.chat_id,
+                        "bundles are DM-only — the sealed file is your code, "
+                        "and I don't post code into a group. open a DM: /link",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "bundle-dm-only")
+        if not self.bundle_passphrase:
+            self._reply(decision.chat_id,
+                        "no sealing key provisioned, so I refuse rather than "
+                        "guess one. operator: store a passphrase as the "
+                        "systemd credential `bundle_passphrase`.",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "bundle-no-key")
+        try:
+            res = pack_github(cmd.arg, self.github_fetch, self.bundle_passphrase,
+                              limits=self._pack_limits())
+        except PackRefused as e:
+            self._reply(decision.chat_id, f"bundle refused — {str(e)[:300]}",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "bundle-refused")
+        except (PackError, AuditDenied) as e:
+            self._reply(decision.chat_id, f"no bundle — {str(e)[:200]}",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "bundle-error")
+        except Exception:
+            self._reply(decision.chat_id, "no bundle — try again.",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "bundle-error")
+        try:
+            self._send_document(decision.chat_id, res.filename(), res.blob,
+                                caption=render_pack(res, max_len=1000),
+                                thread_id=decision.thread_id,
+                                boundary="----devin" + res.bundle_sha256[:16])
+        except TelegramError as e:
+            self._reply(decision.chat_id,
+                        f"sealed ({res.files} files) but the upload failed: "
+                        f"{str(e)[:200]}",
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "bundle-upload-error")
+        return HandledResult(uid, "replied", f"bundle:{res.files}f")
 
     def _handle_doctor(self, uid, cmd: Command, decision: AccessDecision) -> HandledResult:
         try:

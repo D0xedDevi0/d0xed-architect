@@ -27,6 +27,8 @@ GITHUB_TOKEN_ENV = "DEVIN_GITHUB_TOKEN"
 CREDENTIALS_DIR_ENV = "CREDENTIALS_DIRECTORY"
 CREDENTIAL_FILENAME = "telegram_token"
 GITHUB_CREDENTIAL_FILENAME = "github_token"
+BUNDLE_CREDENTIAL_FILENAME = "bundle_passphrase"
+BUNDLE_PASSPHRASE_ENV = "DEVIN_BUNDLE_PASSPHRASE"
 
 # Telegram bot tokens are "<bot_id>:<secret>". Validate shape only — the value
 # is never stored in a repr, log, or error message.
@@ -104,7 +106,29 @@ def resolve_token(env=None) -> str:
     return (env.get(TOKEN_ENV) or "").strip()
 
 
-def resolve_github_token(env=None) -> str:
+def resolve_bundle_passphrase(env=None) -> str | None:
+    """The passphrase used to seal /bundle artifacts.
+
+    Credential directory first (systemd `LoadCredentialEncrypted`), then the
+    environment. Returns None when unset — and None means /bundle REFUSES
+    rather than sealing under a guessable default. The value is never logged,
+    never returned in an error, and never part of Config's repr.
+    """
+    env = env if env is not None else os.environ
+    cred_dir = env.get(CREDENTIALS_DIR_ENV)
+    if cred_dir:
+        path = os.path.join(cred_dir, BUNDLE_CREDENTIAL_FILENAME)
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                value = fh.read().strip()
+            if value:
+                return value
+        except OSError:
+            pass
+    return (env.get(BUNDLE_PASSPHRASE_ENV) or "").strip() or None
+
+
+def resolve_github_token(env=None) -> str | None:
     """Return the optional GitHub token from the systemd credential dir, else
     the env var. Empty when not configured (private repos simply won't work).
 

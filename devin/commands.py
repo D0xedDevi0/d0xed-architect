@@ -5,7 +5,7 @@ registration (see the bot dispatch-table test). Commands are:
 
   /start [payload]   /help   /lore   /doctor   /link
   /audit <url>  /debug <url>  /map <url>  /sitemap <url>
-  /crawl <url> [depth]
+  /crawl <url> [depth]   /bundle <github-url>
 
 Anything else — unknown commands, plain text, oversized messages, wrong arity,
 an out-of-range crawl depth — is a `reject` and never reaches a handler.
@@ -19,10 +19,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 COMMANDS = ("/start", "/help", "/lore", "/audit", "/debug", "/map", "/crawl",
-            "/sitemap", "/link", "/doctor")
+            "/sitemap", "/link", "/bundle", "/doctor")
 
 _NO_ARG = ("help", "lore", "doctor", "link")
-_ONE_ARG = ("audit", "debug", "map", "sitemap")
+_ONE_ARG = ("audit", "debug", "map", "sitemap", "bundle")
 _DEPTH_ARG = ("crawl",)
 
 # A crawl deeper than this stops being a site map and starts being a burden on
