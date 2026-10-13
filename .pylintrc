@@ -1,0 +1,21 @@
+# Pylint baseline for d0xed-architect.
+#
+# This repository predates linting. The Pylint starter workflow produced ~260
+# findings across code that ships and passes its test suite, plus import-error
+# noise from optional dependencies (cryptography, eth_account, mcp) the CI job
+# never installed. Disabling the checks, or rewriting 260 unrelated lines in one
+# commit, would both be worse than useless — the first hides real regressions,
+# the second buries this project's actual work in churn.
+#
+# So this is a BASELINE gate, not a clean-output gate:
+#
+#   * pylint still prints every message in the job log — nothing is suppressed;
+#   * the SCORE may not regress below the recorded baseline.
+#
+# The tree scores 8.4/10 on Python 3.12; the gate sits at 8.0 to leave headroom
+# for pylint version drift. Raise it as the baseline improves: that is the whole
+# point of a baseline.
+[MAIN]
+fail-under = 8.0
+py-version = 3.12
+ignore = build, dist, .venv, node_modules
