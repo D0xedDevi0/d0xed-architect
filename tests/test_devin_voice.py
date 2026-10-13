@@ -18,7 +18,7 @@ from devin.config import Config, Limits
 from devin.report import render_help
 from tests.devin_fixtures import (BOT_ID, BOT_USERNAME, FAKE_TOKEN, GROUP_ID,
                                   USER_ID, FakeGithub, FakeTelegram,
-                                  build_tarball, dm_update, group_update)
+                                  build_tarball, dm_update)
 
 MEMBER_A = 555001
 MEMBER_B = 555002
@@ -110,6 +110,8 @@ class TestAuthoredVoice(unittest.TestCase):
         # The authored voice and the model path obey one contract: no links, no
         # handles, no claims of having done work. If a line here ever trips the
         # guard, the model path and the authored path have drifted apart.
+        # Reaching into the authored corpus is the point of this test.
+        # pylint: disable=protected-access
         lines = [ln for opts in voice._REPLIES.values() for ln in opts]
         lines += list(voice.NOSTALGIA.values())
         for line in lines:
@@ -182,14 +184,14 @@ class TestBotSocialLayer(unittest.TestCase):
 
     def test_authored_beats_never_consult_the_model(self):
         model = FakeModel()
-        bot, tg = make_bot(llm=model)
+        bot, _ = make_bot(llm=model)
         r = bot.handle_update(dm_update(1, USER_ID, "who are you"))
         self.assertEqual(r.detail, "voice:identity")
         self.assertEqual(model.calls, [])            # nothing spent, nothing sent
 
     def test_sibling_bot_never_reaches_the_social_layer_or_a_model(self):
         model = FakeModel()
-        bot, tg = make_bot(llm=model)
+        bot, _ = make_bot(llm=model)
         r = bot.handle_update(bot_sender_update(
             1, "/help@%s" % BOT_USERNAME))
         self.assertEqual(r.detail, "help")

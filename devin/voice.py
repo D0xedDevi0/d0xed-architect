@@ -293,10 +293,9 @@ def classify(text: str) -> str:
     return "banter"
 
 
-def reply(text: str, *, username: str | None = None) -> str | None:
+def reply(text: str) -> str | None:
     """The deterministic social answer, or None when DEVin has nothing to add
-    (the caller then shows the menu). `username` is unused here and kept for
-    symmetry with the model path."""
+    (the caller then tries the optional model, then `fallback`, then the menu)."""
     kind = classify(text)
     if kind == "nostalgia":
         return nostalgia_note(text)
@@ -353,6 +352,9 @@ def llm_reply(text: str, call) -> str | None:
     try:
         out = call([{"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": text.strip()[:600]}], 900)
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
+        # Deliberate: any endpoint failure — DNS, TLS, timeout, a non-JSON body,
+        # an exhausted key — must degrade to the authored voice, never surface as
+        # an error in the room. Nothing here inspects or reports the exception.
         return None
     return guard(out) or None
