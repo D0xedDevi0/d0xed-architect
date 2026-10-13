@@ -16,7 +16,13 @@ like the other Looper companions on the VPS (`looper-glass`, `looper-mrbates`):
 1. The token belongs to the pinned identity — startup calls `getMe` and refuses
    any bot other than `DEVIN_BOT_ID` / `DEVIN_BOT_USERNAME`, and refuses to run
    if a webhook is set (long polling would silently receive nothing).
-2. `DEVIN_ALLOWED_USERS` / `DEVIN_ALLOWED_GROUPS` are the only chats served;
+2. `DEVIN_ALLOWED_USERS` / `DEVIN_ALLOWED_GROUPS` are the only chats served.
+   A `*` in `DEVIN_ALLOWED_USERS` opens **DMs to every user** (the owner's
+   switch for a public bot) and does nothing for groups: the group branch never
+   consults it, so a token in the user allowlist cannot expose a room DEVin was
+   not added to. Unnamed DM callers get the same 15s per-person cooldown that
+   protects a room; the named ids keep their unthrottled path. Verify the live
+   value with `systemctl show looper-devin -p Environment`, never the file;
    everything else is denied (private) or silent (groups/channels).
 3. In a group the bot answers only when addressed — `/cmd@DEVinlooperbot`, an
    `@DEVinlooperbot` mention (with or without a command after it), or a reply
@@ -123,6 +129,18 @@ install -m 0600 /dev/null /opt/data/.secrets/devin-llm.env
 systemctl daemon-reload && systemctl restart looper-devin
 journalctl -u looper-devin -n 3    # expect voice=model
 ```
+
+Provisioned live 2026-10-13 (owner-approved portal key): the env file holds
+`DEVIN_LLM_ENDPOINT` / `DEVIN_LLM_API_KEY` / `DEVIN_LLM_MODEL` at 0640
+`root:looper-devin`, loaded by a drop-in
+`/etc/systemd/system/looper-devin.service.d/llm.conf` so the main unit stays
+free of optional lines. Prove it with three things, never the file: the startup
+line says `voice=model`, `tr '\0' '\n' < /proc/$(systemctl show -p MainPID
+--value looper-devin)/environ | cut -d= -f1` lists the `DEVIN_LLM_*` keys, and a
+foreground smoke test as the service user prints the raw model text AND the
+guard verdict (so a guard trip is distinguishable from a transport failure).
+Expect the first `getMe` after a restart to take up to a minute on a cold
+connection — the online line is late, not missing.
 
 What the code enforces regardless of configuration: the endpoint must be https
 and its host allowlisted in `config.LLM_HOSTS` (re-checked at call time, not

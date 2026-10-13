@@ -103,13 +103,19 @@ a 2400-baud modem, a floppy, amber phosphor, a turbo button, a soldering iron,
 DOS, IRC, an Amiga, punch cards, dot matrix — he answers as someone who used
 them.
 
-🟦 **Open-ended tech questions** ("explain a rollup vs an L2") go to an
-*optional* model, enabled only by `DEVIN_LLM_ENDPOINT` / `DEVIN_LLM_API_KEY` /
-`DEVIN_LLM_MODEL` on an allowlisted inference host. Without it they get an
-honest next step instead of an invented answer. Every model reply must pass a
-hard guard — no links, no handles, no claims of having run, deployed, bought or
-sent anything, no price talk, no secret requests — or it is thrown away and the
-authored voice answers.
+🟦 **He is open.** His DMs answer anyone — no invite, no allowlist — and in a
+room he answers when addressed. An unnamed visitor gets the same 15-second
+per-person cooldown that protects a room, so one person cannot put the crawler
+to work in a loop. The named owner keeps an unthrottled path.
+
+🟦 **Open-ended tech questions** ("explain a rollup vs an L2") go to a *live*
+model on a host-pinned inference endpoint (`DEVIN_LLM_ENDPOINT` /
+`DEVIN_LLM_API_KEY` / `DEVIN_LLM_MODEL`; the host must be allowlisted in
+`config.LLM_HOSTS` and is re-checked at call time). If it is unconfigured or
+fails, an open question gets an honest next step instead of an invented answer.
+Every model reply must pass a hard guard — no links, no handles, no claims of
+having run, deployed, bought or sent anything, no price talk, no secret
+requests — or it is thrown away and the authored voice answers.
 
 🟦 **He never gets chatty in a room**: one answer per person per 10 seconds,
 the room's menu hint is budgeted per chat, and a *bot* sender cannot reach the

@@ -181,8 +181,9 @@ def render_sigil(text: str) -> str:
 
 def render_link(username: str | None) -> str:
     """Shareable links. `username` is the live getMe username; nothing here is
-    a credential and nothing here authorizes access — the allowlist still
-    decides who is served."""
+    a credential and nothing here authorizes access — the access layer still
+    decides who is served (DMs are open; a room must be allowlisted, and in a
+    room he answers only when addressed)."""
     u = (username or "DEVinlooperbot").lstrip("@")
     base = f"https://t.me/{u}"
     lines = [

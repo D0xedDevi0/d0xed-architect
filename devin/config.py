@@ -21,6 +21,10 @@ from dataclasses import dataclass
 
 TOKEN_ENV = "DEVIN_BOT_TOKEN"
 USERS_ENV = "DEVIN_ALLOWED_USERS"
+#: The token in DEVIN_ALLOWED_USERS that opens DMs to ANY user. Rooms are NOT
+#: affected: a group is authorized by the GROUP allowlist, so this token can
+#: never expose a room DEVin was not explicitly added to.
+OPEN_USERS_TOKEN = "*"
 GROUPS_ENV = "DEVIN_ALLOWED_GROUPS"
 BOT_ID_ENV = "DEVIN_BOT_ID"
 BOT_USERNAME_ENV = "DEVIN_BOT_USERNAME"
@@ -96,10 +100,12 @@ class Config:
     bot_username: str | None = None     # used for group @mention addressing
     github_token: str | None = None     # optional; never printed (see __repr__)
     llm: "LlmConfig | None" = None      # optional social layer; never printed
+    open_dms: bool = False              # DEVIN_ALLOWED_USERS carried `*`
 
     def __repr__(self) -> str:  # deliberately omits token AND github_token
         return (f"Config(allowed_user_ids={self.allowed_user_ids}, "
                 f"allowed_group_ids={self.allowed_group_ids}, "
+                f"open_dms={self.open_dms}, "
                 f"bot_id={self.bot_id}, bot_username={self.bot_username!r}, "
                 f"limits={self.limits!r})")
 
@@ -208,6 +214,31 @@ def resolve_llm(env=None) -> "LlmConfig | None":
     return LlmConfig(endpoint=endpoint, api_key=api_key, model=model)
 
 
+def _users_are_open(value: str | None) -> bool:
+    """True when the user allowlist carries the open token.
+
+    Named ids may sit alongside it (the owner's id stays listed), so opening
+    DMs to the world does not cost the owner his fast path or the journal its
+    named sender.
+    """
+    if not value:
+        return False
+    return OPEN_USERS_TOKEN in re.split(r"[,\s;]+", value.strip())
+
+
+def _named_users(value: str | None) -> str:
+    """The user allowlist with the open token removed.
+
+    `*` can sit beside real ids, and the integer parser below must not see it —
+    a token it cannot parse is a hard error on purpose (fail closed), so the
+    open token is filtered out here rather than tolerated there.
+    """
+    if not value:
+        return ""
+    return " ".join(p for p in re.split(r"[,\s;]+", value.strip())
+                    if p and p != OPEN_USERS_TOKEN)
+
+
 def load_config(env=None) -> Config:
     """Load and validate configuration from `env` (defaults to os.environ)."""
     env = env if env is not None else os.environ
@@ -216,8 +247,10 @@ def load_config(env=None) -> Config:
         raise ConfigError(f"missing {TOKEN_ENV}")
     if not _TOKEN_RE.match(token):
         raise ConfigError("invalid bot token format")
-    users = _parse_ids(USERS_ENV, env.get(USERS_ENV))
-    if not users:
+    users_raw = env.get(USERS_ENV)
+    open_dms = _users_are_open(users_raw)
+    users = _parse_ids(USERS_ENV, _named_users(users_raw)) or ()
+    if not users and not open_dms:
         raise ConfigError(f"missing {USERS_ENV}")
     groups = _parse_ids(GROUPS_ENV, env.get(GROUPS_ENV)) or ()
     bot_id = None
@@ -230,7 +263,7 @@ def load_config(env=None) -> Config:
     bot_username = (env.get(BOT_USERNAME_ENV) or "").strip() or None
     github_token = resolve_github_token(env) or None
     llm = resolve_llm(env)
-    return Config(token=token, allowed_user_ids=users,
+    return Config(token=token, allowed_user_ids=users, open_dms=open_dms,
                   allowed_group_ids=groups, limits=Limits(),
                   bot_id=bot_id, bot_username=bot_username,
                   github_token=github_token, llm=llm)

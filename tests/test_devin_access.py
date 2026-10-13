@@ -51,6 +51,33 @@ class TestAccess(unittest.TestCase):
         d = auth.decide(group_update(5, USER_ID, GROUP_ID, "/help"))
         self.assertFalse(d.ok)
 
+    def test_open_dms_accept_a_stranger_in_private(self):
+        # `*` in DEVIN_ALLOWED_USERS — the owner's choice to serve the public
+        # from his DMs. Nobody is named, and a stranger is served.
+        auth = Authorizer([], [GROUP_ID], open_dms=True)
+        d = auth.decide(dm_update(10, 424242, "/help"))
+        self.assertTrue(d.ok)
+        self.assertEqual(d.reason, "dm-open")
+
+    def test_open_dms_never_open_a_room(self):
+        # The open token lives in the USER allowlist, and the group branch never
+        # consults it, so it cannot expose a group DEVin was not added to.
+        auth = Authorizer([], [GROUP_ID], open_dms=True)
+        d = auth.decide(group_update(11, 424242, -123, "/help"))
+        self.assertFalse(d.ok)
+        self.assertEqual(d.reason, "group not allowlisted")
+
+    def test_open_dms_do_not_disturb_the_named_path(self):
+        auth = Authorizer([USER_ID], [GROUP_ID], open_dms=True)
+        self.assertTrue(auth.decide(dm_update(12, USER_ID, "/help")).ok)
+        self.assertEqual(auth.decide(group_update(13, USER_ID, GROUP_ID,
+                                                 "/help")).reason, "group")
+
+    def test_dms_stay_closed_without_the_token(self):
+        d = self.auth.decide(dm_update(14, 424242, "/help"))
+        self.assertFalse(d.ok)
+        self.assertEqual(d.reason, "sender not allowlisted")
+
     def test_channel_denied(self):
         upd = {"update_id": 6,
                "message": {"message_id": 1, "from": {"id": USER_ID},

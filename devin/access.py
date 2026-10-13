@@ -4,7 +4,9 @@ Nothing outside the allowlist is ever answered with bot content. A denied
 private sender gets a single bounded "Access denied."; denied groups/channels
 are answered with silence (no amplification, no existence signal).
 
-A DM is authorized by the USER allowlist. A group/supergroup is authorized by
+a DM is authorized by the USER allowlist — or by ANY user when the allowlist
+carries the open token (`*`), the owner's choice for a bot that serves the
+public from his DMs. A group/supergroup is authorized by
 the GROUP allowlist — the room is the principal, so any member may use the bot
 once they address it (the bot layer still requires the address). An allowlisted
 room that has not been allowlisted as a group is silence, not an error.
@@ -26,9 +28,13 @@ class AccessDecision:
 
 
 class Authorizer:
-    def __init__(self, allowed_user_ids, allowed_group_ids=()):
+    def __init__(self, allowed_user_ids, allowed_group_ids=(), open_dms=False):
         self.allowed_user_ids = set(allowed_user_ids)
         self.allowed_group_ids = set(allowed_group_ids or ())
+        # `open_dms` opens PRIVATE chats only. It is deliberately incapable of
+        # opening a room: the group branch below never consults it, so a token
+        # in the user allowlist cannot expose a group DEVin was not added to.
+        self.open_dms = bool(open_dms)
 
     def decide(self, update: dict) -> AccessDecision:
         if not isinstance(update, dict):
@@ -50,6 +56,8 @@ class Authorizer:
                     thread_id=thread_id)
 
         if chat_type == "private":
+            if self.open_dms:
+                return AccessDecision(True, "dm-open", **base)
             if user_id not in self.allowed_user_ids:
                 return AccessDecision(False, "sender not allowlisted", **base)
             return AccessDecision(True, "dm", **base)

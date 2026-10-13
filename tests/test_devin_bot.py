@@ -367,6 +367,44 @@ class TestGroupReachability(unittest.TestCase):
         self.assertEqual(second.detail, "cooldown:audit")
         self.assertTrue(third.detail.startswith("audit:"))
 
+    def test_a_stranger_can_dm_when_dms_are_open(self):
+        # `*` in the allowlist: the chat TYPE decides, not the user id.
+        cfg = Config(token=FAKE_TOKEN, allowed_user_ids=(USER_ID,),
+                     allowed_group_ids=(GROUP_ID,), limits=Limits(),
+                     bot_id=BOT_ID, bot_username=BOT_USERNAME, open_dms=True)
+        bot = DevinBot(cfg, FakeTelegram(), FakeGithub(), clock=lambda: 1000.0)
+        r = bot.handle_update(dm_update(1, self.OTHER_USER, "/help"))
+        self.assertEqual(r.action, "replied")
+        self.assertEqual(r.detail, "help")
+
+    def test_an_unnamed_dm_is_throttled_on_expensive_commands(self):
+        # Open DMs must not be a free crawler: the cooldown that protects a room
+        # applies to an unnamed private caller too.
+        now = [1000.0]
+        cfg = Config(token=FAKE_TOKEN, allowed_user_ids=(USER_ID,),
+                     allowed_group_ids=(GROUP_ID,), limits=Limits(),
+                     bot_id=BOT_ID, bot_username=BOT_USERNAME, open_dms=True)
+        gh = FakeGithub(tarball=build_tarball({"src/app.py": b"x = 1\n"}))
+        bot = DevinBot(cfg, FakeTelegram(), gh, clock=lambda: now[0])
+        url = "https://github.com/o/r"
+        first = bot.handle_update(dm_update(1, self.OTHER_USER, f"/audit {url}"))
+        second = bot.handle_update(dm_update(2, self.OTHER_USER, f"/audit {url}"))
+        self.assertTrue(first.detail.startswith("audit:"))
+        self.assertEqual(second.detail, "cooldown:audit")
+
+    def test_the_named_owner_keeps_his_unthrottled_dm(self):
+        now = [1000.0]
+        cfg = Config(token=FAKE_TOKEN, allowed_user_ids=(USER_ID,),
+                     allowed_group_ids=(GROUP_ID,), limits=Limits(),
+                     bot_id=BOT_ID, bot_username=BOT_USERNAME)
+        gh = FakeGithub(tarball=build_tarball({"src/app.py": b"x = 1\n"}))
+        bot = DevinBot(cfg, FakeTelegram(), gh, clock=lambda: now[0])
+        url = "https://github.com/o/r"
+        first = bot.handle_update(dm_update(1, USER_ID, f"/audit {url}"))
+        second = bot.handle_update(dm_update(2, USER_ID, f"/audit {url}"))
+        self.assertTrue(first.detail.startswith("audit:"))
+        self.assertTrue(second.detail.startswith("audit:"))
+
     def test_cheap_commands_are_never_throttled(self):
         bot, _, tg = make_bot()
         for i in range(1, 4):

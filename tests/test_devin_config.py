@@ -129,5 +129,38 @@ class TestGithubToken(unittest.TestCase):
         self.assertNotIn(FAKE_GITHUB_TOKEN, repr(cfg))
 
 
+class TestOpenDms(unittest.TestCase):
+    """`*` in DEVIN_ALLOWED_USERS opens private chats to anyone.
+
+    It is the owner's switch for a bot that serves the public from its DMs. It
+    must be incapable of opening a room, and it must not be reachable by an
+    empty or malformed allowlist.
+    """
+
+    def _cfg(self, users):
+        return load_config({TOKEN_ENV: FAKE_TOKEN, USERS_ENV: users})
+
+    def test_star_opens_dms_with_nobody_named(self):
+        cfg = self._cfg("*")
+        self.assertTrue(cfg.open_dms)
+        self.assertEqual(cfg.allowed_user_ids, ())
+
+    def test_star_alongside_the_owner_keeps_the_id(self):
+        cfg = self._cfg("424242 *")
+        self.assertTrue(cfg.open_dms)
+        self.assertEqual(cfg.allowed_user_ids, (424242,))
+
+    def test_without_the_star_dms_stay_closed(self):
+        self.assertFalse(self._cfg("424242").open_dms)
+
+    def test_an_empty_allowlist_still_refuses_to_start(self):
+        for empty in ("", "   ", ","):
+            with self.assertRaises(ConfigError):
+                self._cfg(empty)
+
+    def test_open_dms_are_reported_in_the_repr(self):
+        self.assertIn("open_dms=True", repr(self._cfg("*")))
+
+
 if __name__ == "__main__":
     unittest.main()

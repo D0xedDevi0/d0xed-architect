@@ -270,6 +270,21 @@ sibling bot through only on a `/cmd@self`, so no two-bot loop and no inference
 call can be provoked from a room. In rooms the human chatter itself is bounded —
 one answer per person per 10 seconds, with the menu hint budgeted per chat.
 
+### Live wiring and the open-DM switch
+
+The model path is live: a flash model on a pinned inference host, provisioned as
+a systemd `EnvironmentFile` (0640, service-user group) loaded by a drop-in, so
+the main unit carries no optional lines and the key never reaches the unit file,
+a log, or a repr. The startup line names the layer (`voice=model`), and the
+host is re-validated on every call.
+
+`DEVIN_ALLOWED_USERS` may carry `*`, which opens DMs to any user while the ids
+beside it stay named. The open token is scoped to private chats only: the group
+branch of the authorizer never consults it, so it cannot expose a room DEVin was
+not added to. Because an open DM is no longer a trusted chat, unnamed DM callers
+are held to the same per-person cooldown as a room, and the named owner keeps his
+unthrottled path.
+
 This layer adds personality and open-ended conversation only. It adds no
 wallet, payment, settlement, on-chain, execution or autonomous-deployment
 capability, and the persona copy may not imply one.

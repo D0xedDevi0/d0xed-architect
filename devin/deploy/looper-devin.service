@@ -16,7 +16,11 @@ ExecStart=/srv/looper-agents/devin/venv/bin/python -u -m devin
 # QUOTE a multi-value Environment= line: systemd splits an unquoted value on
 # whitespace and silently drops everything after the first token
 # ("Invalid environment assignment, ignoring: -100...").
-Environment=DEVIN_ALLOWED_USERS=7898354400
+# `*` OPENS DMs TO EVERY USER (no effect on groups): a group is still authorized
+# by DEVIN_ALLOWED_GROUPS, so this token can never expose a room DEVin was not
+# added to. An unnamed caller gets the 15s per-person cooldown in DMs; the named
+# id above keeps its unthrottled path. Drop the `*` to go back to owner-only DMs.
+Environment="DEVIN_ALLOWED_USERS=7898354400 *"
 Environment="DEVIN_ALLOWED_GROUPS=-1004351143165 -1003533071599"
 # Pin the expected bot identity; startup refuses any other token.
 Environment=DEVIN_BOT_ID=8803435794

@@ -66,7 +66,8 @@ class DevinBot:
                  social_cooldown_s: float = SOCIAL_COOLDOWN_S):
         self.config = config
         self.authorizer = Authorizer(config.allowed_user_ids,
-                                     config.allowed_group_ids)
+                                     config.allowed_group_ids,
+                                     open_dms=config.open_dms)
         self.transport = transport      # (url, method, body, timeout) -> Response
         self.github_fetch = github_fetch  # (url, timeout, headers=None) -> Response
         self.public_fetch = public_fetch  # (url, timeout) -> Response (site map)
@@ -173,9 +174,11 @@ class DevinBot:
         # Adopt the live identity for group @mention addressing.
         self.bot_id = bot_id
         self.bot_username = username
-        self._log("DEVin online: @%s id=%s dm_allow=%d groups=%s sealing=%s "
+        self._log("DEVin online: @%s id=%s dm_allow=%s groups=%s sealing=%s "
                   "github=%s voice=%s can_read_all_group_messages=%s"
-                  % (username, bot_id, len(self.config.allowed_user_ids),
+                  % (username, bot_id,
+                     "open" if self.config.open_dms
+                     else str(len(self.config.allowed_user_ids)),
                      list(self.config.allowed_group_ids),
                      "yes" if self.bundle_passphrase else "NO",
                      "yes" if self.config.github_token else "no",
@@ -235,10 +238,13 @@ class DevinBot:
     def _throttled(self, decision: AccessDecision) -> bool:
         """True when this caller asked for another expensive command too soon.
 
-        Only rooms are policed: a DM is already allowlisted to named people, and
-        throttling the owner in his own chat would only make the bot feel broken
-        (running /audit then /debug back to back is normal there)."""
-        if decision.chat_type not in ("group", "supergroup"):
+        Rooms are policed per (chat, person). A NAMED user's DM stays
+        unthrottled — that is the owner's own chat, where running /audit then
+        /debug back to back is normal. With the open token in the allowlist any
+        stranger can DM, so an UNNAMED caller gets the same cooldown in a private
+        chat; otherwise one person could put the crawler to work in a loop."""
+        if (decision.chat_type not in ("group", "supergroup")
+                and decision.user_id in self.config.allowed_user_ids):
             return False
         key = (decision.chat_id, decision.user_id)
         now = self._clock()
