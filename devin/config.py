@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import re
+import urllib.parse
 from dataclasses import dataclass
 
 TOKEN_ENV = "DEVIN_BOT_TOKEN"
@@ -29,6 +30,18 @@ CREDENTIAL_FILENAME = "telegram_token"
 GITHUB_CREDENTIAL_FILENAME = "github_token"
 BUNDLE_CREDENTIAL_FILENAME = "bundle_passphrase"
 BUNDLE_PASSPHRASE_ENV = "DEVIN_BUNDLE_PASSPHRASE"
+LLM_ENDPOINT_ENV = "DEVIN_LLM_ENDPOINT"
+LLM_KEY_ENV = "DEVIN_LLM_API_KEY"
+LLM_MODEL_ENV = "DEVIN_LLM_MODEL"
+LLM_TIMEOUT_S = 30.0
+
+# The social layer's optional model call may only ever reach these hosts: an
+# endpoint anywhere else disables the model path entirely (fail-closed) instead
+# of shipping a prompt to an unvetted address.
+LLM_HOSTS = frozenset({
+    "inference-api.nousresearch.com", "api.deepseek.com", "openrouter.ai",
+    "api.openai.com", "api.anthropic.com", "api.together.xyz", "api.groq.com",
+})
 
 # Telegram bot tokens are "<bot_id>:<secret>". Validate shape only — the value
 # is never stored in a repr, log, or error message.
@@ -37,6 +50,24 @@ _TOKEN_RE = re.compile(r"^\d{6,12}:[A-Za-z0-9_-]{30,}$")
 
 class ConfigError(ValueError):
     """Raised when required configuration is missing or invalid."""
+
+
+@dataclass(frozen=True)
+class LlmConfig:
+    """The OPTIONAL in-voice model endpoint (see `voice.py`).
+
+    Its ``api_key`` is never printed: `__repr__` omits it exactly like
+    `Config.__repr__` omits the bot token, so a stray ``print(config)`` in a
+    debug session cannot leak it into a journal.
+    """
+
+    endpoint: str
+    api_key: str
+    model: str
+
+    def __repr__(self) -> str:
+        return (f"LlmConfig(endpoint={self.endpoint!r}, "
+                f"model={self.model!r})")
 
 
 @dataclass(frozen=True)
@@ -64,6 +95,7 @@ class Config:
     bot_id: int | None = None           # expected bot identity (pinned at startup)
     bot_username: str | None = None     # used for group @mention addressing
     github_token: str | None = None     # optional; never printed (see __repr__)
+    llm: "LlmConfig | None" = None      # optional social layer; never printed
 
     def __repr__(self) -> str:  # deliberately omits token AND github_token
         return (f"Config(allowed_user_ids={self.allowed_user_ids}, "
@@ -152,6 +184,30 @@ def resolve_github_token(env=None) -> str | None:
     return (env.get(GITHUB_TOKEN_ENV) or "").strip()
 
 
+def resolve_llm(env=None) -> "LlmConfig | None":
+    """The optional social-layer model, or None.
+
+    None — the default — means DEVin answers only from the authored lines in
+    `voice.py`: deterministic, offline, and identical with the network down. A
+    half-configured endpoint, a non-https URL, or a host outside `LLM_HOSTS`
+    all resolve to None, so the model path turns OFF rather than sending a
+    prompt somewhere unvetted. The key is read here and never printed.
+    """
+    env = env if env is not None else os.environ
+    endpoint = (env.get(LLM_ENDPOINT_ENV) or "").strip()
+    api_key = (env.get(LLM_KEY_ENV) or "").strip()
+    model = (env.get(LLM_MODEL_ENV) or "").strip()
+    if not (endpoint and api_key and model):
+        return None
+    try:
+        p = urllib.parse.urlsplit(endpoint)
+    except ValueError:
+        return None
+    if p.scheme != "https" or (p.hostname or "").lower() not in LLM_HOSTS:
+        return None
+    return LlmConfig(endpoint=endpoint, api_key=api_key, model=model)
+
+
 def load_config(env=None) -> Config:
     """Load and validate configuration from `env` (defaults to os.environ)."""
     env = env if env is not None else os.environ
@@ -173,7 +229,8 @@ def load_config(env=None) -> Config:
             raise ConfigError(f"{BOT_ID_ENV} must be an integer") from None
     bot_username = (env.get(BOT_USERNAME_ENV) or "").strip() or None
     github_token = resolve_github_token(env) or None
+    llm = resolve_llm(env)
     return Config(token=token, allowed_user_ids=users,
                   allowed_group_ids=groups, limits=Limits(),
                   bot_id=bot_id, bot_username=bot_username,
-                  github_token=github_token)
+                  github_token=github_token, llm=llm)

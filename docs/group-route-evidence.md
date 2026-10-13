@@ -92,3 +92,34 @@ systemctl show looper-devin -p Environment
 An `Environment=` line with several space-separated values must be quoted:
 unquoted, systemd applies the first token and logs `Invalid environment
 assignment, ignoring: <rest>`, which silently removed a whole group here.
+
+## Social layer, live (same credential mount)
+
+After the voice layer was deployed, the same check produced `7/7` again with the
+social layer answering in the real room — captured, never sent:
+
+```
+ok  bare /help            (never delivered under group privacy) ignored  (not addressed in group)
+ok  /help@DEVinlooperbot                           replied  (help)  -> POST chat_id=-1004351143165 reply_to=102
+ok  @DEVinlooperbot /help   (mention prefix)       replied  (help)  -> POST chat_id=-1004351143165 reply_to=103
+ok  @DEVinlooperbot what do you do?  (social)      replied  (voice:capability)  -> POST chat_id=-1004351143165 reply_to=104
+ok  reply to one of his messages                   replied  (help)  -> POST chat_id=-1004351143165 reply_to=105
+ok  sibling bot, bare mention  (loop breaker)      ignored  (not addressed in group)
+ok  sibling bot, addressed command                 replied  (help)  -> POST chat_id=-1004351143165 reply_to=107
+real DM round trip: replied (help)  <- check your DM
+```
+
+The running service reported its voice mode at startup, so which layer answers
+is never a mystery in the journal:
+
+```
+DEVin online: @DEVinlooperbot id=8803435794 dm_allow=1 groups=[-1004351143165, -1003533071599] \
+  sealing=yes github=yes voice=authored-only can_read_all_group_messages=False
+```
+
+`voice=authored-only` means the optional model is off and every answer came from
+the authored lines in `devin/voice.py` — the state the live check above ran in.
+The live Telegram profile was verified by READ-BACK, not by the write call:
+`getMyDescription` / `getMyShortDescription` / `getMyCommands` all matched the
+constants in `devin/report.py` exactly (466 / 91 chars, 13 commands including
+`spellbook` and `sigil`).

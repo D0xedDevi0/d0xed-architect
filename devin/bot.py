@@ -28,8 +28,9 @@ from .pack import (PackError, PackLimits, PackRefused, build_pack, pack_github,
 from .upload import (MAX_UPLOAD_BYTES, UploadDenied, cleanup, download_cap,
                      intake, parse_document, safe_file_path, sniff)
 from .report import (PHOTO, render_deep_report, render_help, render_hint,
-                     render_link, render_lore, render_report, render_site_map,
-                     render_start)
+                     render_link, render_lore, render_nudge, render_report,
+                     render_sigil, render_site_map, render_start)
+from . import voice
 
 TELEGRAM_API = "https://api.telegram.org"
 POLL_ERROR_BACKOFF = 2.0
@@ -40,6 +41,10 @@ MAX_BACKOFF = 30.0
 EXPENSIVE_COMMANDS = ("audit", "debug", "map", "crawl", "sitemap", "bundle")
 USER_COOLDOWN_S = 15.0
 HINT_COOLDOWN_S = 60.0
+
+# A human talking to DEVin (no command) is answered at most this often per
+# person: alive in the room, never a chatterbox.
+SOCIAL_COOLDOWN_S = 10.0
 
 
 class TelegramError(Exception):
@@ -57,7 +62,8 @@ class DevinBot:
     def __init__(self, config: Config, transport, github_fetch, public_fetch=None,
                  bundle_passphrase: str | None = None, file_get=None,
                  transport_max_bytes: int = MAX_UPLOAD_BYTES, clock=None,
-                 verbose: bool = False):
+                 verbose: bool = False, llm=None,
+                 social_cooldown_s: float = SOCIAL_COOLDOWN_S):
         self.config = config
         self.authorizer = Authorizer(config.allowed_user_ids,
                                      config.allowed_group_ids)
@@ -78,6 +84,13 @@ class DevinBot:
         self._clock = clock or time.monotonic
         self._last_use: dict[tuple[int | None, int | None], float] = {}
         self._last_hint: dict[int | None, float] = {}
+        self._last_social: dict[tuple[int | None, int | None], float] = {}
+        # The OPTIONAL social-layer model: `call(messages, max_tokens) -> str`,
+        # bound by __main__ from an env-gated, host-allowlisted endpoint. None
+        # means the authored voice in `voice.py` answers everything (no network,
+        # no key, nothing to leak). A bot sender never reaches it either way.
+        self.llm = llm
+        self.social_cooldown_s = float(social_cooldown_s)
         # Per-update lines go to the journal in production; tests leave it off.
         self.verbose = bool(verbose)
         # Live identity, adopted from getMe at startup; seeded from config so
@@ -161,11 +174,12 @@ class DevinBot:
         self.bot_id = bot_id
         self.bot_username = username
         self._log("DEVin online: @%s id=%s dm_allow=%d groups=%s sealing=%s "
-                  "github=%s can_read_all_group_messages=%s"
+                  "github=%s voice=%s can_read_all_group_messages=%s"
                   % (username, bot_id, len(self.config.allowed_user_ids),
                      list(self.config.allowed_group_ids),
                      "yes" if self.bundle_passphrase else "NO",
                      "yes" if self.config.github_token else "no",
+                     "model" if self.llm else "authored-only",
                      me.get("can_read_all_group_messages")))
         if me.get("can_read_all_group_messages") is False and \
                 self.config.allowed_group_ids:
@@ -249,6 +263,50 @@ class DevinBot:
 
     # ── journal lines (no message text, no secrets) ─────────────────────────
 
+    def _social(self, uid, decision: AccessDecision,
+                text: str | None) -> HandledResult:
+        """Answer a human who addressed DEVin without a command.
+
+        The authored voice answers the known beats — greeting, identity,
+        builder talk, nostalgia, and the refusals — so the character is the
+        same with the network down, costs nothing, and cannot be talked out of
+        its limits. Open-ended questions go to the optional model when one is
+        configured; failing that `fallback` names a real next step; failing
+        that a room gets the bounded menu hint and a DM gets the nudge.
+
+        A BOT sender cannot reach this: the addressed-in-group gate lets a bot
+        through only on `/cmd@self`, so there is no path from a sibling bot to
+        the social layer — or to a model.
+        """
+        now = self._clock()
+        key = (decision.chat_id, decision.user_id)
+        last = self._last_social.get(key)
+        if last is not None and (now - last) < self.social_cooldown_s:
+            return HandledResult(uid, "ignored", "social-cooldown")
+        self._last_social[key] = now
+
+        text = text or ""
+        out = voice.reply(text)
+        detail = ""
+        if out:
+            detail = "voice:" + voice.classify(text)
+        elif self.llm is not None:
+            out = voice.llm_reply(text, self.llm)
+            detail = "voice:model" if out else ""
+        if not out:
+            out = voice.fallback(text)
+            detail = "voice:code_q" if out else ""
+        if not out:
+            if decision.chat_type in ("group", "supergroup"):
+                return self._hint(uid, decision)
+            self._reply(decision.chat_id, render_nudge(),
+                        reply_to=decision.message_id,
+                        thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "nudge")
+        self._reply(decision.chat_id, out, reply_to=decision.message_id,
+                    thread_id=decision.thread_id)
+        return HandledResult(uid, "replied", detail)
+
     def _log(self, line: str) -> None:
         if self.verbose:
             print(line, flush=True)
@@ -321,26 +379,36 @@ class DevinBot:
         if not text and isinstance(msg.get("document"), dict):
             return self._handle_document(uid, msg, decision)
 
-        cmd = parse_command(self._unmention(text),
-                            self.config.limits.max_message_len)
+        # Strip the mention ONCE: both the command parser and the social layer
+        # read the same words, so "@DEVinlooperbot hi" is a greeting, not noise.
+        words = self._unmention(text)
+        cmd = parse_command(words, self.config.limits.max_message_len)
 
         if cmd.kind in EXPENSIVE_COMMANDS and self._throttled(decision):
             return HandledResult(uid, "ignored", f"cooldown:{cmd.kind}")
 
-        if cmd.kind == "reject" and cmd.error == "not a command":
+        if cmd.kind == "reject" and cmd.error in ("not a command",
+                                                  "empty message"):
             # Addressed in a room without a command. Answer with the menu (bounded
             # per chat) instead of a bare refusal, so a room that mentioned him
             # gets something usable back.
             if decision.chat_type in ("group", "supergroup"):
-                return self._hint(uid, decision)
+                return self._social(uid, decision, words)
+            # A human DMing plain text gets the social layer: the authored
+            # voice, the optional model, or the nudge — never a bare refusal.
+            return self._social(uid, decision, words)
 
         if cmd.kind == "start":
             self._send_welcome(decision, cmd.arg)
             return HandledResult(uid, "replied", f"start:{cmd.arg or '-'}")
-        if cmd.kind == "help":
+        if cmd.kind in ("help", "spellbook"):
             self._reply(decision.chat_id, render_help(),
                         reply_to=decision.message_id, thread_id=decision.thread_id)
-            return HandledResult(uid, "replied", "help")
+            return HandledResult(uid, "replied", cmd.kind)
+        if cmd.kind == "sigil":
+            self._reply(decision.chat_id, render_sigil(cmd.arg or ""),
+                        reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "sigil")
         if cmd.kind == "lore":
             self._reply(decision.chat_id,
                         render_lore(max_len=self.config.limits.max_reply_len),

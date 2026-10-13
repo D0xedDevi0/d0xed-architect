@@ -25,8 +25,9 @@ class TestPersonaCopy(unittest.TestCase):
     def test_command_menu_shape(self):
         names = [c["command"] for c in COMMANDS]
         self.assertEqual(names,
-                         ["start", "help", "lore", "audit", "debug", "map",
-                          "crawl", "sitemap", "link", "bundle", "doctor"])
+                         ["start", "help", "spellbook", "lore", "audit",
+                          "debug", "map", "crawl", "sitemap", "link", "sigil",
+                          "bundle", "doctor"])
         for c in COMMANDS:
             self.assertRegex(c["command"], r"^[a-z0-9_]{1,32}$")
             self.assertTrue(1 <= len(c["description"]) <= 256)
@@ -42,7 +43,7 @@ class TestPersonaCopy(unittest.TestCase):
     def test_guarantees_stated_and_not_contradicted(self):
         low = DESCRIPTION.lower()
         self.assertIn("static only", low)
-        self.assertIn("never run your code", low)
+        self.assertIn("i never run it", low)
         self.assertIn("never touch a wallet", low)
         self.assertIn("never executed", HELP_TEXT.lower())
 

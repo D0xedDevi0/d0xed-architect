@@ -31,6 +31,11 @@ LoadCredentialEncrypted=telegram_token:/etc/credstore.encrypted/looper-devin.tok
 # from starting (systemd fails closed on LoadCredentialEncrypted), and without
 # it sealing refuses rather than using a guessable default.
 #LoadCredentialEncrypted=bundle_passphrase:/etc/credstore.encrypted/looper-devin.bundle
+# Optional: the SOCIAL LAYER's model (see deploy/README.md). The file holds
+# DEVIN_LLM_ENDPOINT / DEVIN_LLM_API_KEY / DEVIN_LLM_MODEL, and the host must be
+# allowlisted in devin/config.py. Without it the authored voice in voice.py
+# answers everything and nothing leaves the box (startup logs voice=authored-only).
+#EnvironmentFile=/opt/data/.secrets/devin-llm.env
 Restart=always
 RestartSec=10
 UMask=0077

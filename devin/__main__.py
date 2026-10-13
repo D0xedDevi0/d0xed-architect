@@ -24,6 +24,12 @@ def main() -> int:
                    transport.public_fetch,
                    bundle_passphrase=resolve_bundle_passphrase(),
                    file_get=transport.telegram_file_get,
+                   # The social layer's OPTIONAL model, bound from an env-gated,
+                   # host-allowlisted endpoint. None (the default) means the
+                   # authored voice in `voice.py` answers everything — no
+                   # network, no key. The value is never printed or logged; the
+                   # startup line says only "voice=model|authored-only".
+                   llm=transport.make_llm(config.llm),
                    # One journal line per update (no message text, no secrets),
                    # so a silent bot is diagnosable instead of a mystery.
                    verbose=True)

@@ -98,7 +98,7 @@ def main() -> int:
          group_update(2, MEMBER, "/help@%s" % u), "replied"),
         ("@%s /help   (mention prefix)" % u,
          group_update(3, MEMBER, "@%s /help" % u), "replied"),
-        ("@%s what do you do?   (bare mention)" % u,
+        ("@%s what do you do?   (social layer answers)",
          group_update(4, MEMBER, "@%s what do you do?" % u), "replied"),
         ("reply to one of his messages",
          group_update(5, MEMBER, "/help", reply_to_bot=True), "replied"),

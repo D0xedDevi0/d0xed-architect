@@ -20,12 +20,14 @@ import urllib.request
 
 from architect import safe_fetch
 from architect.http import MAX_BYTES, Response, UA
+from .config import LLM_HOSTS, LLM_TIMEOUT_S
 
 TELEGRAM_HOST = "api.telegram.org"
 GITHUB_HOSTS = frozenset({"github.com", "api.github.com", "codeload.github.com"})
 TOKEN_HOSTS = frozenset({"api.github.com", "codeload.github.com"})
 MAX_REDIRECTS = 3
 TELEGRAM_BODY_CAP = 1_000_000
+LLM_BODY_CAP = 262_144
 
 
 class TransportError(Exception):
@@ -168,3 +170,56 @@ class _AnyPublic:
 
 
 _ANY_PUBLIC_HOST = _AnyPublic()
+def llm_call(endpoint: str, api_key: str, model: str, messages: list,
+             max_tokens: int = 900, timeout: float = 30.0) -> str:
+    """One OpenAI-compatible chat completion, for the social layer only.
+
+    Host-pinned to `config.LLM_HOSTS` (the endpoint is validated again here, not
+    only at config load), POSTs over TLS, and returns the message content.
+
+    Returns "" when the model answered with no content — a reasoning model under
+    a small budget returns ``content: null`` and that must degrade to the
+    authored voice, not to an empty reply. The api_key travels ONLY as an
+    Authorization header to that one host and is never logged.
+    """
+    p = urllib.parse.urlsplit(endpoint)
+    if p.scheme != "https" or (p.hostname or "").lower() not in LLM_HOSTS:
+        raise TransportError("llm host not allowlisted")
+    payload = json.dumps({"model": model, "messages": messages,
+                          "max_tokens": int(max_tokens),
+                          "temperature": 0.7}).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint, data=payload, method="POST",
+        headers={"Content-Type": "application/json",
+                 "Authorization": f"Bearer {api_key}"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout,
+                                    context=_ssl_ctx()) as r:
+            raw = r.read(LLM_BODY_CAP + 1)
+    except urllib.error.HTTPError as e:
+        # Status only: an error body can echo the request, and the request is
+        # not something to write into a journal.
+        raise TransportError(f"llm http {e.code}") from None
+    except Exception as e:
+        raise TransportError(f"llm request failed: {type(e).__name__}") from e
+    if len(raw) > LLM_BODY_CAP:
+        raise TransportError("llm response too large")
+    try:
+        data = json.loads(raw.decode("utf-8"))
+        content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
+    except Exception:
+        raise TransportError("llm returned non-JSON") from None
+    return (content or "").strip()
+
+
+def make_llm(cfg):
+    """Bind a `LlmConfig` into the `call(messages, max_tokens) -> str` shape
+    that `voice.llm_reply` expects. Returns None when unconfigured."""
+    if cfg is None:
+        return None
+
+    def call(messages, max_tokens=900):
+        return llm_call(cfg.endpoint, cfg.api_key, cfg.model, messages,
+                        max_tokens=max_tokens, timeout=LLM_TIMEOUT_S)
+
+    return call

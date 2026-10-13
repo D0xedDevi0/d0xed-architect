@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/D0xedDevi0/d0xed-architect/tree/main/tests"><img src="https://img.shields.io/badge/tests-317%20passed-00d4ff" alt="tests: 317 passed"></a>
+  <a href="https://github.com/D0xedDevi0/d0xed-architect/tree/main/tests"><img src="https://img.shields.io/badge/tests-336%20passed-00d4ff" alt="tests: 336 passed"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white" alt="python 3.11+"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3366cc" alt="license MIT"></a>
   <a href="https://t.me/DEVinlooperbot"><img src="https://img.shields.io/badge/Telegram-DEVinlooperbot-26A5E4?logo=telegram&logoColor=white" alt="Telegram DEVinlooperbot"></a>
@@ -44,6 +44,7 @@ flowchart LR
 | `devin/upload.py` | Private code-set intake: DM a `.zip` / `.tar.gz`, bounded before and after download, magic-byte validation, traversal/symlink/hardlink protection, static-only processing. |
 | `devin/github_audit.py` | Public and private GitHub intake via `api.github.com` + `codeload.github.com`, with an optional PAT used **only** as an `Authorization` header. |
 | `devin/deploy/` | Deployment reality: hardened systemd unit, encrypted credentials, fail-closed allowlists. |
+| `devin/voice.py` | The social layer. An authored, offline voice (greeting, identity, builder talk, the nostalgia desk, refusals) plus a hard output guard, and an **optional** env-gated model for open-ended tech questions. No key → he still talks; a model answer that breaks the rules is discarded, not posted. |
 
 ## Commands
 
@@ -51,6 +52,7 @@ flowchart LR
 |---|---|
 | `/start` | Intro banner |
 | `/help` | Command list |
+| `/spellbook` | How DEVin works, in his own words |
 | `/lore` | Who DEVin is (on-chain identity) |
 | `/audit <github-url>` | Static scan: secrets + risky patterns |
 | `/debug <github-url>` | Deep read: languages, imports, cycles, manifests, CI, tests |
@@ -58,6 +60,7 @@ flowchart LR
 | `/crawl <url> [depth]` | Bounded crawl, same-origin, robots on every URL (depth 1-4, default 2) |
 | `/sitemap <url>` | `sitemap.xml` / `sitemapindex` inventory |
 | `/bundle <github-url>` | Seal a repo into one encrypted file (DM only) |
+| `/sigil <words>` | sha256 stamp of your exact words — the same receipt every finding carries |
 | `/doctor` | Self-diagnostics |
 | `/link` | Deep links to add DEVin anywhere |
 
@@ -71,7 +74,8 @@ stays silent unless it is spoken to. An allowlisted room is authorized as a
 |---|---|
 | `/crawl@DEVinlooperbot https://example.com` | crawls the site |
 | `@DEVinlooperbot /audit https://github.com/o/r` | audits the repo |
-| `@DEVinlooperbot what can you do?` | replies with the menu |
+| `@DEVinlooperbot what can you do?` | answers in his own voice (the spellbook, short form) |
+| `@DEVinlooperbot I still miss my floppy drive` | answers in kind — he came up on old iron |
 | reply to one of its messages | treated as addressed |
 | a bare `/crawl` with no mention | never delivered to the bot at all |
 
@@ -86,6 +90,35 @@ Proof of the whole route — the live check transcript and the service's own
 journal — is in
 [`docs/group-route-evidence.md`](docs/group-route-evidence.md).
 
+## Talking to him
+
+Plain text works — no command needed. He answers from an authored voice that
+needs no network and no API key, so the character is the same on a box with
+nothing configured:
+
+🟦 **The beats he always answers**: greetings, `gm`, thanks, *who are you*,
+*what can you do*, builder talk ("I'm shipping on Base"), the refusals (price,
+trades, wallets — not his desk), and the **nostalgia desk**: mention a BBS,
+a 2400-baud modem, a floppy, amber phosphor, a turbo button, a soldering iron,
+DOS, IRC, an Amiga, punch cards, dot matrix — he answers as someone who used
+them.
+
+🟦 **Open-ended tech questions** ("explain a rollup vs an L2") go to an
+*optional* model, enabled only by `DEVIN_LLM_ENDPOINT` / `DEVIN_LLM_API_KEY` /
+`DEVIN_LLM_MODEL` on an allowlisted inference host. Without it they get an
+honest next step instead of an invented answer. Every model reply must pass a
+hard guard — no links, no handles, no claims of having run, deployed, bought or
+sent anything, no price talk, no secret requests — or it is thrown away and the
+authored voice answers.
+
+🟦 **He never gets chatty in a room**: one answer per person per 10 seconds,
+the room's menu hint is budgeted per chat, and a *bot* sender cannot reach the
+social layer at all (a sibling bot mentioning him is ignored, and no sibling
+bot can make him spend a model call).
+
+🟦 `/sigil <words>` stamps any words you hand over with a sha256 — the same
+receipt that rides on every finding he files.
+
 ## What it looks like
 
 The test suite is the source of truth for what works:
@@ -93,9 +126,9 @@ The test suite is the source of truth for what works:
 ```console
 $ cd d0xed-architect
 $ python3 -m unittest $(ls tests/test_devin_*.py | sed 's|/|.|; s|\.py$||')
-........................................................................................................................................................................................................
+................................................................................................................................................................................................................................................................................................................................................
 ----------------------------------------------------------------------
-Ran 317 tests in 8.074s
+Ran 336 tests in 7.476s
 
 OK
 ```

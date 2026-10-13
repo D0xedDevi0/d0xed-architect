@@ -80,9 +80,9 @@ class TestBotCommands(unittest.TestCase):
             r = bot.handle_update(dm_update(1, USER_ID, cmd))
             self.assertEqual(r.detail, expected, cmd)
         self.assertEqual(COMMANDS,
-                         ("/start", "/help", "/lore", "/audit", "/debug",
-                          "/map", "/crawl", "/sitemap", "/link", "/bundle",
-                          "/doctor"))
+                         ("/start", "/help", "/spellbook", "/lore", "/audit",
+                          "/debug", "/map", "/crawl", "/sitemap", "/link",
+                          "/bundle", "/sigil", "/doctor"))
         # /audit and /debug are exercised here; /map needs an injected fetcher.
         r = bot.handle_update(dm_update(2, USER_ID, "/audit https://github.com/a/b"))
         self.assertTrue(r.detail.startswith("audit:"), r.detail)
@@ -296,14 +296,16 @@ class TestGroupReachability(unittest.TestCase):
         self.assertEqual(r.action, "replied")
         self.assertEqual(r.detail, "help")
 
-    def test_plain_mention_gets_the_menu(self):
+    def test_plain_mention_gets_the_voice(self):
+        # Addressed in a room with no command: the social layer answers in the
+        # desk's own words rather than dumping a bare menu.
         bot, _, tg = make_bot()
         r = bot.handle_update(group_update(
             1, self.OTHER_USER, GROUP_ID, "@DEVinlooperbot what do you do?"))
         self.assertEqual(r.action, "replied")
-        self.assertEqual(r.detail, "hint")
-        self.assertIn(BOT_USERNAME, tg.sent[0]["text"])
+        self.assertEqual(r.detail, "voice:capability")
         self.assertIn("/audit", tg.sent[0]["text"])
+        self.assertIn("never run it", tg.sent[0]["text"])
 
     def test_mention_prefixed_command_runs_the_command(self):
         # "@DEVinlooperbot /audit <url>" is how a person actually types it; the
@@ -315,15 +317,20 @@ class TestGroupReachability(unittest.TestCase):
         self.assertTrue(r.detail.startswith("audit:o/r"))
         self.assertEqual(len(gh.calls), 2)
 
-    def test_menu_hint_is_throttled_per_chat(self):
+    def test_talking_in_a_room_is_throttled_per_person(self):
+        # One person talking twice gets one answer; another member of the same
+        # room is not silenced by that person's cooldown.
         bot, _, tg = make_bot()
         first = bot.handle_update(group_update(
             1, self.OTHER_USER, GROUP_ID, "@DEVinlooperbot hi"))
         second = bot.handle_update(group_update(
             2, self.OTHER_USER, GROUP_ID, "@DEVinlooperbot you there?"))
-        self.assertEqual(first.detail, "hint")
-        self.assertEqual(second.detail, "hint-cooldown")
-        self.assertEqual(len(tg.sent), 1)   # one hint, not two
+        other = bot.handle_update(group_update(
+            3, self.OTHER_USER + 1, GROUP_ID, "@DEVinlooperbot hey"))
+        self.assertEqual(first.detail, "voice:greeting")
+        self.assertEqual(second.detail, "social-cooldown")
+        self.assertTrue(other.detail.startswith("voice:"), other.detail)
+        self.assertEqual(len(tg.sent), 2)   # one answer per person, not three
 
     def test_bot_sender_bare_mention_is_ignored(self):
         # Sibling bots must not be able to start a conversation with a mention.

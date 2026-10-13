@@ -225,7 +225,56 @@ for *private* code. Any member of an allowlisted room can run a **public**
 audit or crawl, but private-repo work still needs the GitHub credential, and
 sealing (`/bundle`, uploaded archives) is DM-only.
 
-## 5. Threat model
+## 5. Social layer — the voice, its guard, and the optional model
+
+`devin/voice.py` is the part of DEVin that talks. It is deliberately the
+smallest-power component in the stack: no network of its own, no filesystem
+access, no shell, and no imports of the crawler, analyzer, packager or
+transport.
+
+Three layers, in order:
+
+🟦 **Authored voice** (`voice.reply`) — greetings, `gm`, thanks, identity,
+capability, builder talk, a nostalgia lexicon, and the refusals (price, trades,
+wallets, secrets). Pure functions, deterministic (a sha256 picks the variant,
+so "hi" always gets the same line), and identical on a box with no network and
+no API key. This is what makes the character trustworthy: it cannot hallucinate,
+cannot be prompt-injected, and costs nothing.
+
+🟦 **Optional model** (`voice.llm_reply`) — only for OPEN intents (a genuine
+tech question), only for a HUMAN sender, and only when
+`DEVIN_LLM_ENDPOINT` / `DEVIN_LLM_API_KEY` / `DEVIN_LLM_MODEL` are all set on an
+allowlisted https inference host (`config.LLM_HOSTS`). The host is re-validated
+at call time in `transport.llm_call`, not only at config load, and the key
+travels only as an `Authorization` header to that one host.
+
+🟦 **Fallback** (`voice.fallback`) — with no model configured, an open question
+gets an honest next step (`/audit <url>`) rather than an invented answer; with
+nothing at all to say, a room gets the bounded menu hint and a DM gets the
+nudge.
+
+### The guard
+
+Every model answer must pass `voice.guard` or it is discarded and the authored
+layer answers instead. The guard rejects any URL, any `@handle`, any claim of
+having run / executed / deployed / installed / sent / bought / sold / moved
+something, any guarantee or price language, secret-request shapes ("send me
+your seed"), and disclosure shapes ("here is the seed phrase"); it bounds a
+reply to 700 characters and 6 lines. The authored lines are asserted to pass
+the same guard in the suite, so the two paths cannot drift — a refusal may
+NAME the object it refuses ("no seed phrase, ever"), it may never request or
+hand one over.
+
+A **bot sender can never reach the model**: the addressed-in-group gate lets a
+sibling bot through only on a `/cmd@self`, so no two-bot loop and no inference
+call can be provoked from a room. In rooms the human chatter itself is bounded —
+one answer per person per 10 seconds, with the menu hint budgeted per chat.
+
+This layer adds personality and open-ended conversation only. It adds no
+wallet, payment, settlement, on-chain, execution or autonomous-deployment
+capability, and the persona copy may not imply one.
+
+## 6. Threat model
 
 The design assumes everything fetched is hostile, and a human holds the
 passphrase. Defenses below are deliberate but not absolute.
@@ -253,7 +302,7 @@ A human decides what happens to the file.
 identification by extension and manifest. It is not semantic comprehension,
 and it is not a claim of runtime or build compatibility across languages.
 
-## 6. Deployment posture
+## 7. Deployment posture
 
 See [`devin/deploy/README.md`](deploy/README.md) for the full picture. The
 short version: an unprivileged `looper-devin` user, the bot token as an

@@ -83,17 +83,54 @@ closed until then.
   `systemd-run --pipe --wait --collect --property=EnvironmentFile=/tmp/devin-env
   --property=LoadCredentialEncrypted=telegram_token:/etc/credstore.encrypted/looper-devin.token
   … venv/bin/python app/devin/scripts/live_group_check.py`
+- Apply the live Telegram profile copy (description, about, command menu) from
+  the single source of truth in `devin/report.py`, then READ IT BACK — a write
+  call's `ok` is not proof the profile is right:
+  `systemd-run --collect --wait --pipe --property=User=looper-devin
+  --property=WorkingDirectory=/srv/looper-agents/devin/app
+  --property=LoadCredentialEncrypted=telegram_token:…/looper-devin.token
+  /srv/looper-agents/devin/venv/bin/python -m devin.scripts.apply_telegram_copy`
+  then compare `getMyDescription` / `getMyShortDescription` / `getMyCommands`
+  against `DESCRIPTION` / `ABOUT` / `COMMANDS`.
+- Talking to him: `@DEVinlooperbot what do you do?` in a room must come back as
+  `voice:capability`, and a sibling bot mentioning him must be ignored. The
+  startup line reports which layer is live: `voice=authored-only` or
+  `voice=model`.
 - Offline proof scripts (passphrase read from the env, never printed):
   `DEVIN_LIVE_PW=… venv/bin/python devin/scripts/live_pack_check.py` and
   `DEVIN_LIVE_ALLOW_SECRETS=1 DEVIN_LIVE_PW=… venv/bin/python devin/scripts/live_upload_check.py`
 
 ## Non-goals
 
-No spend, no wallet, no on-chain writes, no LLM prompt execution, no shell or
-interpreter execution of anything in an audited repository or upload, and no
-autonomous deployment or publishing of any artifact. This unit only serves
-Telegram and performs static, read-only inspection; sealed bundles are a handoff
-artifact a human decides what to do with.
+No spend, no wallet, no on-chain writes, no shell or interpreter execution of
+anything in an audited repository or upload, and no autonomous deployment or
+publishing of any artifact. This unit only serves Telegram and performs static,
+read-only inspection; sealed bundles are a handoff artifact a human decides what
+to do with. The only model call in the stack is the optional social layer's, and
+it receives a short human message — never audited source, never a file, never a
+credential.
+
+## Optional: the social layer's model
+
+The authored voice in `devin/voice.py` needs nothing — no key, no network. The
+model path is opt-in and OFF by default; with it off, `voice=authored-only`
+answers everything and nothing leaves the box. To enable it:
+
+```sh
+install -m 0600 /dev/null /opt/data/.secrets/devin-llm.env
+# fill in: DEVIN_LLM_ENDPOINT, DEVIN_LLM_API_KEY, DEVIN_LLM_MODEL
+# then uncomment EnvironmentFile=/opt/data/.secrets/devin-llm.env in the unit
+systemctl daemon-reload && systemctl restart looper-devin
+journalctl -u looper-devin -n 3    # expect voice=model
+```
+
+What the code enforces regardless of configuration: the endpoint must be https
+and its host allowlisted in `config.LLM_HOSTS` (re-checked at call time, not
+only at load); only an OPEN question from a HUMAN is ever sent — never repo or
+file content, never a sibling bot, and never a known social beat, which answers
+from the authored lines; the reply must pass `voice.guard` or it is discarded; a
+missing, partial or invalid config resolves to None and the bot runs
+authored-only, silently.
 
 A sealed bundle is symmetric AEAD (chacha20-poly1305 + scrypt) for a passphrase
 holder. It is not a signature, not a key exchange, and not forward-secret, and

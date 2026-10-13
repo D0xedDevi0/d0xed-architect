@@ -3,9 +3,9 @@
 The allowed set is a single tuple so a handler cannot exist without a
 registration (see the bot dispatch-table test). Commands are:
 
-  /start [payload]   /help   /lore   /doctor   /link
+  /start [payload]   /help   /spellbook   /lore   /doctor   /link
   /audit <url>  /debug <url>  /map <url>  /sitemap <url>
-  /crawl <url> [depth]   /bundle <github-url>
+  /crawl <url> [depth]   /bundle <github-url>   /sigil <words>
 
 Anything else — unknown commands, plain text, oversized messages, wrong arity,
 an out-of-range crawl depth — is a `reject` and never reaches a handler.
@@ -18,12 +18,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-COMMANDS = ("/start", "/help", "/lore", "/audit", "/debug", "/map", "/crawl",
-            "/sitemap", "/link", "/bundle", "/doctor")
+COMMANDS = ("/start", "/help", "/spellbook", "/lore", "/audit", "/debug",
+            "/map", "/crawl", "/sitemap", "/link", "/bundle", "/sigil",
+            "/doctor")
 
-_NO_ARG = ("help", "lore", "doctor", "link")
+_NO_ARG = ("help", "spellbook", "lore", "doctor", "link")
 _ONE_ARG = ("audit", "debug", "map", "sitemap", "bundle")
 _DEPTH_ARG = ("crawl",)
+
+# /sigil takes free text (it hashes words), so it has its own bound instead of
+# the single-token rule the URL commands use.
+_SIGIL_MAX = 200
 
 # A crawl deeper than this stops being a site map and starts being a burden on
 # someone else's server; the handler also enforces this.
@@ -78,6 +83,12 @@ def parse_command(text: str | None, max_len: int) -> Command:
         if len(rest.split()) != 1:
             return Command("reject", error=f"usage: /{kind} <url>")
         return Command(kind, arg=rest)
+    if kind == "sigil":
+        if not rest:
+            return Command("reject", error="usage: /sigil <words>")
+        if len(rest) > _SIGIL_MAX:
+            return Command("reject", error=f"sigil too long (max {_SIGIL_MAX})")
+        return Command("sigil", arg=rest)
     # /crawl <url> [depth]
     args = rest.split()
     if not args or len(args) > 2:

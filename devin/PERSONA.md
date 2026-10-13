@@ -63,6 +63,34 @@ The visual traits ARE the voice spec. Read them literally:
   `render_lore`, `COMMANDS`) so there is a single source of truth. Do not set
   Telegram copy by hand — change it here and re-apply.
 
+## Social layer (the voice, implemented)
+
+`devin/voice.py` implements the voice rules above as code, in three layers:
+
+🟦 **Authored lines** — greeting, `gm`, thanks, identity, capability, builder
+talk, refusals (price/trades/wallets/secrets), and the **nostalgia desk**: BBS
+and FidoNet, dial-up handshakes, 2400 baud, floppies, amber phosphor, the turbo
+button, soldering irons, DOS, IRC, Amiga/C64/ZX, punch cards, cassettes, Game
+Boy, arcades, Gopher/Usenet, dot matrix. He loves the tech that taught him and
+says so without claiming anyone else's project did anything. Deterministic: a
+sha256 of the words picks the variant, so the same input always gets the same
+answer and the persona is reproducible under test.
+
+🟦 **The optional model** — only for genuinely open tech questions, only for a
+human sender, only when an allowlisted inference endpoint is configured. DEVin
+knows the desk's limits: with no key he gives an honest next step instead of an
+invented answer, and he never lets a model speak outside the voice rules — every
+reply must pass the guard in `voice.py` (no links, handles, price talk, secret
+requests, or claims of work done) or it is thrown away.
+
+🟦 **The sigil** — `/sigil <words>` returns the sha256 of exactly what a human
+handed over, the same stamp every finding carries. It is the persona's one
+ceremony, and it is literally a hash.
+
+Honesty rule for this layer: the social layer is flavour and conversation. It
+grants no wallet, payment, on-chain, execution, or deployment capability, and no
+line of copy may imply one.
+
 ## On-chain identity
 
 The ERC-8004 agent URI for `87226` points at `devin/registration/agent-87226.json`
