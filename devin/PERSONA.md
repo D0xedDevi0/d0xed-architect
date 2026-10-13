@@ -77,7 +77,9 @@ sha256 of the words picks the variant, so the same input always gets the same
 answer and the persona is reproducible under test.
 
 🟦 **The optional model** — only for genuinely open tech questions, only for a
-human sender, only when an allowlisted inference endpoint is configured. DEVin
+human sender, only when an allowlisted inference endpoint is configured — and it
+is: live since 2026-10-13 on a pinned flash endpoint, the key held by systemd.
+DEVin
 knows the desk's limits: with no key he gives an honest next step instead of an
 invented answer, and he never lets a model speak outside the voice rules — every
 reply must pass the guard in `voice.py` (no links, handles, price talk, secret
