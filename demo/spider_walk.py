@@ -336,7 +336,12 @@ def frame(nodes, pos, order, visited, spider, title, sub, badge):
 
 def build(events_path):
     order, pages = load_nodes(events_path)
-    pos = layout(order, 0, 96, W, H)
+    # The tour must be able to STAND on every node. The body is clamped to
+    # x 340..W-340, y 330..H-235 so the legs stay in frame, so the graph is
+    # laid out inside that box. A wider layout looked prettier but stranded the
+    # whole outer ring out of reach: the walk stalled on page 3 while the end
+    # card claimed 40/40. pad=0 keeps the phyllotaxis inside the walkable box.
+    pos = layout(order, 400, 380, W - 400, H - 285, pad=0)
     nodes = {u: pos[u] for u in order}
     spider = Spider()
     spider.place(pos[order[0]][0], pos[order[0]][1], 0.0)
@@ -366,42 +371,58 @@ def build(events_path):
            font=ImageFont.truetype(MONO, 25), fill=AMBER)
     scenes.append((save(img, "s_intro.png"), 3.4))
 
+    # Walk the tour in crawl order. Time ON each page scales with the page's
+    # real word count (both come from the captured timeline), which is also what
+    # makes the tour fill the clip honestly instead of racing through it.
+    words = {e["url"]: e.get("words", 0) for e in pages}
     visited = set()
-    idx = 0
     nframes = 0
-    # walk the tour: aim at each node in crawl order
     target_i = 0
-    speed = 7.5
-    while target_i < len(order) and nframes < 400:
-        tgt = pos[order[target_i]]
-        for _ in range(3):
-            dx, dy = tgt[0] - spider.bx, tgt[1] - spider.by
-            dist = math.hypot(dx, dy)
-            if dist < 26:
-                target_i += 1
-                break
-            want = math.atan2(dy, dx)
-            diff = (want - spider.ba + math.pi) % (2 * math.pi) - math.pi
-            spider.ba += clamp(diff, -0.06, 0.06)          # smooth turn
-            step = min(speed, dist)
-            # keep the body far enough from the edges that legs stay in frame
-            spider.bx = clamp(spider.bx + math.cos(spider.ba) * step, 340, W - 340)
-            spider.by = clamp(spider.by + math.sin(spider.ba) * step, 330, H - 235)
-            spider.update(nodes)
-            visited.add(order[max(0, target_i - 1)])
-            visited.add(order[target_i])
-            nframes += 1
-            done = min(target_i + 1, len(order))
-            img = frame(nodes, pos, order, visited, spider, "D0XED ARCHITECT",
-                        "crawling the site graph — every node is a real page",
-                        f"{done}/{len(order)} PAGES")
-            scenes.append((save(img, f"w{nframes:04d}.png"), 1.0 / 10))
-            if nframes >= 400:
-                break
+    dwell = 0
+    reach = 34.0
+    speed = 10.0
+    max_frames = 560
+    while target_i < len(order) and nframes < max_frames:
+        if dwell > 0:
+            dwell -= 1
+            spider.update(nodes)          # legs keep solving while he reads
+        else:
+            tgt = pos[order[target_i]]
+            for _ in range(4):
+                dx, dy = tgt[0] - spider.bx, tgt[1] - spider.by
+                dist = math.hypot(dx, dy)
+                if dist < reach:          # standing on it: this page is crawled
+                    visited.add(order[target_i])
+                    dwell = 3 + min(4, words.get(order[target_i], 0) // 300)
+                    target_i += 1
+                    break
+                want = math.atan2(dy, dx)
+                diff = (want - spider.ba + math.pi) % (2 * math.pi) - math.pi
+                spider.ba += clamp(diff, -0.30, 0.30)      # heading follows fast
+                step = min(speed, dist)
+                # Translate along the TRUE bearing to the target, not along the
+                # heading. Stepping along a rate-limited heading gives a turning
+                # circle of radius speed/turn (8/0.06 = 133px); any target
+                # inside it can never be faced, so the walk orbited page 3
+                # forever while the badge stayed at 2/40. The body still rotates
+                # toward the bearing for the art — only the position is driven
+                # by the bearing itself.
+                spider.bx = clamp(spider.bx + math.cos(want) * step, 340, W - 340)
+                spider.by = clamp(spider.by + math.sin(want) * step, 330, H - 235)
+                spider.update(nodes)
+        nframes += 1
+        img = frame(nodes, pos, order, visited, spider, "D0XED ARCHITECT",
+                    "crawling the site graph — every node is a real page",
+                    f"{len(visited)}/{len(order)} PAGES")
+        scenes.append((save(img, f"w{nframes:04d}.png"), 1.0 / 10))
 
     # hold on the finished web
+    # The closing card reports what the walk actually reached — never more.
+    done = len(visited)
     img = frame(nodes, pos, order, set(order), spider, "D0XED ARCHITECT",
-                "crawl complete — the web it built", f"{len(order)}/{len(order)} PAGES")
+                "crawl complete — the web it built" if done == len(order)
+                else "the pages he reached — the rest were out of step",
+                f"{done}/{len(order)} PAGES")
     scenes.append((save(img, "s_end.png"), 4.0))
     return scenes
 
