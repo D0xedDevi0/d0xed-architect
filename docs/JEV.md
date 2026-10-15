@@ -31,6 +31,10 @@ Defaults: at most 20 reserved requests per UTC day, a 30-second global cooldown,
 
 The reply shows shadow outcome, purpose/relevance where returned, model, source hash and receipt ID; full receipts remain private on the server. Neither a positive score nor confidence is a safety verdict. Abstentions remain abstentions. No scheduled Jev jobs, automatic wallet actions, private-code inference or crawler reordering are enabled by this release.
 
+Trust limits: the daily ledger is not tamper-evident against its owning service user (or root). Deleting it initializes a fresh ledger; a same-UID writer could also replace it with a valid empty one. Private permissions and shape validation protect against other users and accidental corruption, not a compromised service identity. An unkeyed integrity digest would not change that threat model. Keep provider-account spend limits separate and preserve state across upgrades/rollback.
+
+The bot's explicit `/judge` invocation supplies the public-input consent that the CLI requires as `--allow-model-input`; neither overrides an explicit site denial. The objective filter is intentionally conservative: even benign questions mentioning secret-related terms may be refused. Rephrase without sensitive terms rather than weakening filtering for this release.
+
 ## Service deployment
 
 Keep the existing service unit, Telegram/GitHub/sealing credentials and optional social-model drop-in intact. Provision the Typesafe credential by streaming brokered bytes directly to `systemd-creds encrypt --name=typesafe_api_key - /etc/credstore.encrypted/looper-devin.typesafe` over authenticated SSH. Do not write plaintext key files. Install the optional SDK in DEVin's venv. Stage and test the exact release code as the service user before restart.
