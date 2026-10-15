@@ -26,7 +26,7 @@ class TestPersonaCopy(unittest.TestCase):
         names = [c["command"] for c in COMMANDS]
         self.assertEqual(names,
                          ["start", "help", "spellbook", "lore", "audit",
-                          "debug", "map", "crawl", "sitemap", "link", "sigil",
+                          "debug", "map", "judge", "crawl", "sitemap", "link", "sigil",
                           "bundle", "doctor"])
         for c in COMMANDS:
             self.assertRegex(c["command"], r"^[a-z0-9_]{1,32}$")

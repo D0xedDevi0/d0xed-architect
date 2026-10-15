@@ -681,6 +681,19 @@ def main(argv=None) -> int:
                     help="trusted public PEM file or key directory (default .architect-keys)")
     sv.set_defaults(fn=cmd_sentinel_verify)
 
+    j = sub.add_parser("judge-page", help="opt-in Jev shadow annotations on one permitted public page")
+    j.add_argument("url")
+    j.add_argument("--objective", required=True)
+    j.add_argument("--out", required=True, help="sidecar JSON output")
+    j.add_argument("--offline", action="store_true", help="public acquisition only; no inference")
+    j.add_argument("--allow-model-input", action="store_true", help="attest public model-input permission when site policy is silent; never overrides a denial")
+    j.add_argument("--model", choices=("jev-1.13.0", "jev-1.14.0"), default="jev-1.13.0")
+    j.add_argument("--cache-dir", help="optional private cache outside a source-controlled tree")
+    def judge(args):
+        from .judge_cli import cmd_judge_page
+        return cmd_judge_page(args)
+    j.set_defaults(fn=judge)
+
     args = p.parse_args(argv)
     return args.fn(args)
 

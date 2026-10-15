@@ -82,7 +82,7 @@ class TestBotCommands(unittest.TestCase):
         self.assertEqual(COMMANDS,
                          ("/start", "/help", "/spellbook", "/lore", "/audit",
                           "/debug", "/map", "/crawl", "/sitemap", "/link",
-                          "/bundle", "/sigil", "/doctor"))
+                          "/bundle", "/sigil", "/doctor", "/judge"))
         # /audit and /debug are exercised here; /map needs an injected fetcher.
         r = bot.handle_update(dm_update(2, USER_ID, "/audit https://github.com/a/b"))
         self.assertTrue(r.detail.startswith("audit:"), r.detail)

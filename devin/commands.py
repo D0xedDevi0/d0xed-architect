@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 COMMANDS = ("/start", "/help", "/spellbook", "/lore", "/audit", "/debug",
             "/map", "/crawl", "/sitemap", "/link", "/bundle", "/sigil",
-            "/doctor")
+            "/doctor", "/judge")
 
 _NO_ARG = ("help", "spellbook", "lore", "doctor", "link")
 _ONE_ARG = ("audit", "debug", "map", "sitemap", "bundle")
@@ -43,6 +43,7 @@ class Command:
     arg: str | None = None
     error: str | None = None
     depth: int | None = None
+    objective: str | None = None
 
 
 def _clean_payload(rest: str) -> str | None:
@@ -73,6 +74,18 @@ def parse_command(text: str | None, max_len: int) -> Command:
     if name not in COMMANDS:
         return Command("reject", error="unknown command")
     kind = name[1:]
+    if kind == "judge":
+        url, separator, objective = rest.partition("|")
+        url, objective = url.strip(), objective.strip()
+        try:
+            from architect.decision_types import public_url
+            from architect.semantic import safe_text
+            public_url(url)
+            if not separator or not objective or len(objective.encode()) > 1024 or not safe_text(objective):
+                raise ValueError("judge")
+        except ValueError:
+            return Command("reject", error="usage: /judge <public-url> | <objective>")
+        return Command("judge", arg=url, objective=objective)
     if kind == "start":
         return Command("start", arg=_clean_payload(rest))
     if kind in _NO_ARG:

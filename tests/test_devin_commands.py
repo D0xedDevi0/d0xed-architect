@@ -75,7 +75,7 @@ class TestCommands(unittest.TestCase):
         self.assertEqual(COMMANDS,
                          ("/start", "/help", "/spellbook", "/lore", "/audit",
                           "/debug", "/map", "/crawl", "/sitemap", "/link",
-                          "/bundle", "/sigil", "/doctor"))
+                          "/bundle", "/sigil", "/doctor", "/judge"))
 
 
 if __name__ == "__main__":

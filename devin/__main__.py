@@ -18,6 +18,7 @@ def main() -> int:
     from . import transport
     from .bot import DevinBot
     from .config import resolve_bundle_passphrase
+    from .jev import make_jev_lane
     # None when unprovisioned, which makes /bundle refuse instead of sealing
     # under a default. Never printed, never logged.
     bot = DevinBot(config, transport.telegram_call, transport.github_fetch,
@@ -32,7 +33,7 @@ def main() -> int:
                    llm=transport.make_llm(config.llm),
                    # One journal line per update (no message text, no secrets),
                    # so a silent bot is diagnosable instead of a mystery.
-                   verbose=True)
+                   verbose=True, judge=make_jev_lane())
     bot.run()
     return 0
 

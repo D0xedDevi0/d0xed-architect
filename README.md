@@ -21,6 +21,12 @@ tree, and it statically maps secrets, risky patterns, import cycles, dependency
 rot, and drift — then hands the result back sealed as one encrypted file.
 Source is read. Source is never executed.
 
+## Optional Jev decisions
+
+The crawler can now annotate **one permitted public page** through real hosted Jev without replacing deterministic extraction or access policy. `architect judge-page` writes a separate, validated evidence receipt; DEVin exposes the same boundary with `/judge <public-url> | <objective>` for named human operators only. Private audits and uploads never enter this lane. Jev remains optional, shadow-only and bounded; unavailable or uncertain results stay explicit.
+
+See [the Jev operator guide](docs/JEV.md) for installation, pinned models, public-input consent, private receipts, daily request limits, kill switch and rollback. Existing static commands need no Jev key or SDK.
+
 ## Architecture
 
 ```mermaid

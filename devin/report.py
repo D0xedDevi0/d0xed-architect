@@ -23,8 +23,8 @@ DESCRIPTION = (
     "code.\n\n"
     "Send a repo and I read it cold — secrets, risky patterns, dep rot, "
     "import cycles — every hit stamped path:line with a sha256 sigil.\n\n"
-    "Static only. I read your code, I never run it, never spend, "
-    "never touch a wallet.\n\n"
+    "Static only for code: I never run it, never touch a wallet. "
+    "Named operators can request bounded Jev reads of public pages.\n\n"
     "Wire a tool. Debug a workflow. Ship an integration."
 )
 
@@ -43,6 +43,7 @@ COMMANDS = [
     {"command": "audit", "description": "Read a GitHub repo cold (secrets, risks)"},
     {"command": "debug", "description": "Deep architecture / debug report"},
     {"command": "map", "description": "Map a public site (robots first)"},
+    {"command": "judge", "description": "Jev public-page evidence ranking (operators)"},
     {"command": "crawl", "description": "Crawl a public site: pages, links, assets"},
     {"command": "sitemap", "description": "Read a site's sitemap.xml inventory"},
     {"command": "link", "description": "Shareable links to add DEVin anywhere"},
@@ -83,7 +84,8 @@ START_TEXT = (
     "/lore — who I am.   /doctor — self-check.\n"
     "/help — the rest.   /spellbook — how I work.\n\n"
     "Or just talk to me — ask what I do, or name the machine you grew up on.\n\n"
-    "Static only. I read your code, I never run it. No spend, no wallet.\n"
+    "Code is read, never run. No wallet actions.\n"
+    "Operators: /judge <public-url> | <objective> — bounded Jev read.\n"
     "Wire a tool. Debug a workflow. Ship an integration."
 )
 
@@ -97,6 +99,9 @@ HELP_TEXT = (
     "                   static scan: secrets + risky patterns\n"
     "/debug <url>     — same target, deep read:\n"
     "                   languages, imports, cycles, manifests, CI, tests\n"
+    "/judge <url> | <objective> — Jev public-page relevance, purpose, receipts\n"
+    "                   named operators only; public-input consent, no private code;\n"
+    "                   site denial wins; 20 requests/day, no automatic retries.\n"
     "/map <url>       — /map https://example.com (public site only)\n"
     "                   robots first; same-origin links only\n"
     "/crawl <url> [n] — bounded crawl, same-origin, robots on every URL\n"

@@ -63,7 +63,7 @@ class DevinBot:
                  bundle_passphrase: str | None = None, file_get=None,
                  transport_max_bytes: int = MAX_UPLOAD_BYTES, clock=None,
                  verbose: bool = False, llm=None,
-                 social_cooldown_s: float = SOCIAL_COOLDOWN_S):
+                 social_cooldown_s: float = SOCIAL_COOLDOWN_S, judge=None):
         self.config = config
         self.authorizer = Authorizer(config.allowed_user_ids,
                                      config.allowed_group_ids,
@@ -91,6 +91,7 @@ class DevinBot:
         # means the authored voice in `voice.py` answers everything (no network,
         # no key, nothing to leak). A bot sender never reaches it either way.
         self.llm = llm
+        self.judge = judge  # explicit human-triggered public-page lane only
         self.social_cooldown_s = float(social_cooldown_s)
         # Per-update lines go to the journal in production; tests leave it off.
         self.verbose = bool(verbose)
@@ -420,6 +421,20 @@ class DevinBot:
                         render_lore(max_len=self.config.limits.max_reply_len),
                         reply_to=decision.message_id, thread_id=decision.thread_id)
             return HandledResult(uid, "replied", "lore")
+        if cmd.kind == "judge":
+            if bool((msg.get("from") or {}).get("is_bot")) or decision.user_id not in self.config.allowed_user_ids:
+                self._reply(decision.chat_id, "Jev is limited to named operators. Ordinary chat and static tools are unchanged.",
+                            reply_to=decision.message_id, thread_id=decision.thread_id)
+                return HandledResult(uid, "denied", "judge-operator-only")
+            if self.judge is None:
+                result = "Jev is not enabled here. Static tools remain available."
+            else:
+                try:
+                    result = self.judge(cmd.arg, cmd.objective, str(uid)+":"+str(decision.chat_id)+":"+str(decision.message_id))
+                except Exception:
+                    result = "Jev unavailable. No automatic retry."
+            self._reply(decision.chat_id, result, reply_to=decision.message_id, thread_id=decision.thread_id)
+            return HandledResult(uid, "replied", "judge")
         if cmd.kind == "audit":
             return self._handle_audit(uid, cmd, decision)
         if cmd.kind == "debug":
