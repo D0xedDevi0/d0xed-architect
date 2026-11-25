@@ -6,15 +6,23 @@ extract/trust/graph modules the CLI uses — with per-page events written out
 so the crawl can be replayed as an animation. The video is not a mock: it is
 this timeline, drawn.
 
+Every page event carries a provenance receipt - final URL, HTTP status, byte
+count and the SHA-256 of the raw response body - the same receipt scheme as
+devin/crawl2.py, so each lit node is tied to bytes that were really fetched.
+
   crawl_capture.py https://d0xeddev.com out.jsonl [max_pages] [depth]
 """
 import concurrent.futures as cf
+import hashlib
 import json
 import sys
 import time
+import os
 import urllib.parse
 
-sys.path.insert(0, "/opt/data/d0xed-architect")
+# Repo-relative so the demo reproduces from any clone, not one machine.
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
 
 from architect import extract as _extract          # noqa: E402
 from architect import http as _http                # noqa: E402
@@ -22,7 +30,8 @@ from architect import trust as _trust              # noqa: E402
 from architect.graph import Graph                  # noqa: E402
 
 START = sys.argv[1] if len(sys.argv) > 1 else "https://d0xeddev.com"
-OUT = sys.argv[2] if len(sys.argv) > 2 else "/opt/data/d0xed-architect/demo/crawl-events.jsonl"
+OUT = (sys.argv[2] if len(sys.argv) > 2
+       else os.path.join(os.path.dirname(os.path.abspath(__file__)), "crawl-events.jsonl"))
 MAX_PAGES = int(sys.argv[3]) if len(sys.argv) > 3 else 25
 DEPTH = int(sys.argv[4]) if len(sys.argv) > 4 else 2
 CONCURRENCY = 6
@@ -87,7 +96,7 @@ def main():
                 if pages_done >= MAX_PAGES:
                     continue
                 try:
-                    status, resp = fut.result()
+                    status, resp, sha, nbytes = fut.result()
                 except Exception as e:
                     ev(kind="error", url=url, error=str(e)[:80])
                     continue
@@ -123,6 +132,7 @@ def main():
 
                 path = urllib.parse.urlsplit(url).path or "/"
                 ev(kind="page", url=url, path=path, depth=depth,
+                   sha256=sha, bytes=nbytes,
                    words=page.word_count, trust=tr.score,
                    links=len(page.links), new_links=new_links,
                    ext_links=ext_links, title=(page.title or "")[:70],
@@ -133,7 +143,9 @@ def main():
         queue = next_queue
 
     stats = graph.stats()
-    ev(kind="done", pages=pages_done, nodes=stats.get("nodes", 0),
+    ev(kind="done", pages=pages_done,
+       receipts=sum(1 for e in events if e.get("sha256")),
+       nodes=stats.get("nodes", 0),
        edges=stats.get("edges", 0), duration=round(time.time() - t0, 3),
        by_kind=stats.get("by_kind", {}))
 
@@ -149,13 +161,19 @@ def main():
 
 
 def _fetch(url):
+    """Fetch one URL -> (status, text, sha256, nbytes).
+
+    The digest is taken over the RAW response body, matching the receipt scheme
+    in devin/crawl2.py, so a page event is verifiable against real bytes.
+    """
     r = _http.fetch(url, timeout=15, allow_402=False)
     if r.status == 402:
-        return 402, None
+        return 402, None, "", 0
     ct = r.content_type or ""
     if "html" not in ct and "text" not in ct:
-        return 204, None
-    return 200, r.text
+        return 204, None, "", 0
+    body = r.body or b""
+    return 200, r.text, hashlib.sha256(body).hexdigest(), len(body)
 
 
 if __name__ == "__main__":

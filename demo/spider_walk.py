@@ -34,7 +34,7 @@ WHITE = (232, 238, 248)
 FPS = 24
 MONO_B = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 MONO = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
-OUTDIR = "/opt/data/d0xed-architect/demo"
+OUTDIR = os.path.dirname(os.path.abspath(__file__))  # repo-relative: reproduces from any clone
 FRAMES = os.path.join(OUTDIR, "spider_frames")
 
 
@@ -375,13 +375,14 @@ def build(events_path):
     # real word count (both come from the captured timeline), which is also what
     # makes the tour fill the clip honestly instead of racing through it.
     words = {e["url"]: e.get("words", 0) for e in pages}
+    shas = {e["url"]: e.get("sha256", "") for e in pages}
     visited = set()
     nframes = 0
     target_i = 0
     dwell = 0
     reach = 34.0
     speed = 10.0
-    max_frames = 560
+    max_frames = 900  # cap only; the loop exits when the last page is reached
     while target_i < len(order) and nframes < max_frames:
         if dwell > 0:
             dwell -= 1
@@ -411,17 +412,21 @@ def build(events_path):
                 spider.by = clamp(spider.by + math.sin(want) * step, 330, H - 235)
                 spider.update(nodes)
         nframes += 1
+        here = order[min(target_i, len(order) - 1)]
+        receipt = f"sha256 {shas.get(here, '')[:12]}…" if shas.get(here) else "reading…"
         img = frame(nodes, pos, order, visited, spider, "D0XED ARCHITECT",
-                    "crawling the site graph — every node is a real page",
+                    f"every node a real page · {receipt}",
                     f"{len(visited)}/{len(order)} PAGES")
         scenes.append((save(img, f"w{nframes:04d}.png"), 1.0 / 10))
 
     # hold on the finished web
     # The closing card reports what the walk actually reached — never more.
     done = len(visited)
+    receipted = sum(1 for u in visited if shas.get(u))
     img = frame(nodes, pos, order, set(order), spider, "D0XED ARCHITECT",
-                "crawl complete — the web it built" if done == len(order)
-                else "the pages he reached — the rest were out of step",
+                ("crawl complete — every page receipted (sha256 %d/%d)" % (receipted, done))
+                if done == len(order)
+                else ("the pages he reached — %d of %d receipted" % (receipted, done)),
                 f"{done}/{len(order)} PAGES")
     scenes.append((save(img, "s_end.png"), 4.0))
     return scenes
@@ -451,5 +456,11 @@ if __name__ == "__main__":
     out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(OUTDIR, "d0xed-spider.mp4")
     sc = build(ev)
     encode(out, sc)
-    print(f"frames: {len(sc)}  ({sum(d for _, d in sc):.1f}s)")
-    print(f"video : {out}")
+    # Report what the FILE got, not the nominal scene sum. Each scene is
+    # quantized to whole frames at FPS, so a 0.1 s walk frame becomes 2 frames at
+    # 24 fps and the nominal sum overstates the clip (an earlier print said 53.7s
+    # for a 45.1s file and read like two different renders).
+    nvid = sum(max(1, int(round(d * FPS))) for _, d in sc)
+    print(f"scenes: {len(sc)}")
+    print(f"video : {nvid} frames @ {FPS}fps = {nvid / FPS:.1f}s")
+    print(f"file  : {out}")

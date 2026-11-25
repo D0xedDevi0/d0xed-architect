@@ -198,21 +198,29 @@ visualizer is driven by that same timeline:
 $ python3 demo/crawl_capture.py https://d0xeddev.com demo/crawl-events.jsonl 40 3
 events : 70
 pages  : 40
-nodes  : 40  edges: 619
-time   : 11.69s
+nodes  : 40  edges: 480
+time   : 7.80s
 out    : demo/crawl-events.jsonl
 
 $ python3 demo/spider_walk.py demo/crawl-events.jsonl demo/d0xed-spider.mp4
-frames: 465  (53.7s)
-video : demo/d0xed-spider.mp4
+scenes: 454
+video : 1082 frames @ 24fps = 45.1s
+file  : demo/d0xed-spider.mp4
 ```
 
-[d0xed-spider.mp4](demo/d0xed-spider.mp4) — 46 s, 1600x900. Every lit node is a
-page that was really fetched (each one carrying a SHA-256 provenance receipt),
-every edge is a real link found on one of them, and the badge counts pages the
-walk has actually reached: 40/40 only once it stands on the last one, never
-before. `robots.txt` was fetched first and allowed the walk, the crawl stayed on
-one origin, and it stayed inside its page, byte and time caps.
+[d0xed-spider.mp4](demo/d0xed-spider.mp4) — 1600x900, 45.1 s at 24 fps. Every lit
+node is a page that was really fetched, and every page event carries a
+provenance receipt: final URL, HTTP status, byte count and the SHA-256 of the
+**raw response body** — the same receipt scheme as `devin/crawl2.py`. The
+receipts are committed alongside the video in
+[demo/crawl-events.jsonl](demo/crawl-events.jsonl): 40 pages, 40 receipts, 39
+distinct digests, because `d0xeddev.com` and `d0xeddev.com/` are the same 35138
+bytes (which is the receipts doing their job). Every edge is a real link found
+on one of those pages, the digest prefix of the page the walk is on is drawn
+into the frame, and the badge counts pages the walk has actually reached: 40/40
+only once it stands on the last one, never before. `robots.txt` was fetched
+first and allowed the walk, the crawl stayed on one origin, and it stayed inside
+its page, byte and time caps.
 
 The creature is not decoration: its legs plant on the nodes it has reached, it
 turns toward the next page in crawl order, and it dwells longer on pages with
