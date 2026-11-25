@@ -8,7 +8,7 @@ from devin.commands import parse_command
 from devin.config import Config, Limits
 from devin.bot import DevinBot
 from devin.jev import JevLane, JevBudget, resolve_jev_key
-from devin_fixtures import FakeTelegram, FakeGithub, USER_ID, GROUP_ID, BOT_ID, BOT_USERNAME, FAKE_TOKEN, dm_update
+from tests.devin_fixtures import FakeTelegram, FakeGithub, USER_ID, GROUP_ID, BOT_ID, BOT_USERNAME, FAKE_TOKEN, dm_update
 
 class DevinJevTests(unittest.TestCase):
     def test_command_registration_and_strict_syntax(self):
